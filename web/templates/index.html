@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Chat with Beq{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <h1>Beq</h1>
+    <p class="subtitle">Your own open-source language model · Pure PyTorch · No external APIs</p>
+</section>
+
+{% if not model_loaded %}
+<div class="alert alert-warning">
+    <strong>Model not loaded.</strong><br>
+    Train Beq first:
+    <pre>python train/train.py</pre>
+    Then restart the web server.
+</div>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<section class="chat-box">
+    <form action="/chat" method="post" class="chat-form">
+        <label for="prompt">Talk to Beq</label>
+        <textarea id="prompt" name="prompt" rows="4" placeholder="Write something and Beq will continue..." required>{{ prompt or "" }}</textarea>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="max_tokens">Max tokens</label>
+                <input type="number" id="max_tokens" name="max_tokens" value="100" min="10" max="200">
+            </div>
+            <div class="control-group">
+                <label for="temperature">Temperature</label>
+                <input type="number" id="temperature" name="temperature" value="0.8" min="0.1" max="1.5" step="0.1">
+            </div>
+            <button type="submit" class="btn-primary" {% if not model_loaded %}disabled{% endif %}>
+                Generate
+            </button>
+        </div>
+    </form>
+
+    {% if result %}
+    <div class="result">
+        <h3>Beq’s reply</h3>
+        <div class="output">
+            <span class="prompt-part">{{ result.prompt }}</span><span class="completion-part">{{ result.completion }}</span>
+        </div>
+    </div>
+    {% endif %}
+</section>
+
+<section class="info-cards">
+    <div class="card">
+        <h3>100% Yours</h3>
+        <p>Architecture, training code and weights are completely open and under your control.</p>
+    </div>
+    <div class="card">
+        <h3>No API Keys</h3>
+        <p>Everything runs on your machine. No OpenAI, no Anthropic, no cloud AI services.</p>
+    </div>
+    <div class="card">
+        <h3>Pure PyTorch</h3>
+        <p>Custom Transformer written from scratch. Easy to read, modify and improve.</p>
+    </div>
+</section>
+{% endblock %}
