@@ -70,9 +70,9 @@ async def startup():
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
+        request=request,
+        name="index.html",
+        context={
             "model_loaded": model is not None,
         },
     )
@@ -80,14 +80,19 @@ async def home(request: Request):
 
 @app.get("/about", response_class=HTMLResponse)
 async def about(request: Request):
-    return templates.TemplateResponse("about.html", {"request": request})
+    return templates.TemplateResponse(
+        request=request,
+        name="about.html",
+        context={},
+    )
 
 
 @app.get("/generate", response_class=HTMLResponse)
 async def generate_page(request: Request):
     return templates.TemplateResponse(
-        "generate.html",
-        {"request": request, "model_loaded": model is not None},
+        request=request,
+        name="generate.html",
+        context={"model_loaded": model is not None},
     )
 
 
@@ -164,9 +169,9 @@ async def chat(
             }
 
     return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
+        request=request,
+        name="index.html",
+        context={
             "model_loaded": model is not None,
             "result": result,
             "error": error,
