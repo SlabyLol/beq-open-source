@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}About Beq{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <h1>About Beq</h1>
+    <p class="subtitle">A real language model you can own, train and understand.</p>
+</section>
+
+<section class="content">
+    <h2>What is Beq?</h2>
+    <p>
+        Beq is a small GPT-style language model written entirely in pure PyTorch.
+        It was created so anyone can have their own AI without relying on external APIs
+        or closed models.
+    </p>
+
+    <h2>Core principles</h2>
+    <ul>
+        <li><strong>Own the model</strong> – architecture + weights belong to you</li>
+        <li><strong>No external AI APIs</strong> – everything runs locally</li>
+        <li><strong>Transparent</strong> – clean, readable code</li>
+        <li><strong>Open source</strong> – MIT license, free to use and modify</li>
+    </ul>
+
+    <h2>Technical details</h2>
+    <ul>
+        <li>Decoder-only Transformer (GPT-style)</li>
+        <li>Implemented from scratch in PyTorch</li>
+        <li>Character-level tokenizer (simple and fully self-contained)</li>
+        <li>Trained with standard next-token prediction</li>
+        <li>Web interface with FastAPI + plain HTML pages</li>
+    </ul>
+
+    <h2>How to train your own version</h2>
+    <pre>
+# 1. Put your text data into data/input.txt
+# 2. Train
+python train/train.py --data data/input.txt --max_steps 5000
+
+# 3. Start the web server
+python web/app.py
+    </pre>
+
+    <h2>Repository</h2>
+    <p>
+        The full project is open source under the name <strong>beq-open-source</strong>.
+        You can fork it, improve the architecture, train on your own data, and share your version.
+    </p>
+</section>
+{% endblock %}
