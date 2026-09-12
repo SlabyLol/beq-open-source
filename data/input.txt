@@ -1,0 +1,9 @@
+Once upon a time there was a little language model called Beq.
+Beq was born from pure PyTorch code and a lot of curiosity.
+Beq learned to talk by reading many stories and conversations.
+Beq does not use any external AI API. Everything runs locally.
+People can chat with Beq through a simple web page.
+Beq wants to become better every day by learning from more text.
+The creators of Beq believe that open source AI should be transparent.
+Anyone can look at the code, train their own version, and improve it.
+This is the beginning of Beq, a small but real language model.
