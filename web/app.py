@@ -32,14 +32,41 @@ model = None
 tokenizer = None
 
 
+def quick_train_tiny():
+    """Train a very small model that fits in free-tier RAM."""
+    print("Training tiny Beq model (low RAM mode)...")
+    import subprocess
+    cmd = [
+        sys.executable, "train/train.py",
+        "--data", "data/input.txt",
+        "--out_dir", "checkpoints",
+        "--d_model", "64",
+        "--n_layers", "2",
+        "--n_heads", "2",
+        "--block_size", "32",
+        "--batch_size", "8",
+        "--max_steps", "250",
+        "--eval_interval", "100",
+        "--save_interval", "250",
+    ]
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        raise RuntimeError("Tiny training failed")
+    print("Tiny training done.")
+
+
 def load_model():
     global model, tokenizer
 
     if not CHECKPOINT_PATH.exists() or not TOKENIZER_PATH.exists():
-        print("No checkpoint found.")
-        print("Free Render tier has only 512MB RAM - auto-training disabled.")
-        print("Train locally: python train/train.py")
-        print("Then commit checkpoints/beq_best.pt + tokenizer.json")
+        try:
+            quick_train_tiny()
+        except Exception as e:
+            print(f"Training failed: {e}")
+            return False
+
+    if not CHECKPOINT_PATH.exists() or not TOKENIZER_PATH.exists():
+        print("Still no checkpoint after training.")
         return False
 
     tokenizer = CharTokenizer.load(TOKENIZER_PATH)
