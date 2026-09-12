@@ -32,42 +32,14 @@ model = None
 tokenizer = None
 
 
-def quick_train():
-    """Train a tiny model automatically so Render works out of the box."""
-    print("No checkpoint found – starting quick training (approx. 1–2 min)...")
-    import subprocess
-
-    cmd = [
-        sys.executable, "train/train.py",
-        "--data", "data/input.txt",
-        "--out_dir", "checkpoints",
-        "--d_model", "128",
-        "--n_layers", "4",
-        "--n_heads", "4",
-        "--block_size", "64",
-        "--batch_size", "8",
-        "--max_steps", "300",
-        "--eval_interval", "150",
-        "--save_interval", "300",
-    ]
-    result = subprocess.run(cmd, capture_output=False)
-    if result.returncode != 0:
-        raise RuntimeError("Quick training failed")
-    print("Quick training finished.")
-
-
 def load_model():
     global model, tokenizer
 
-    if not CHECKPOINT_PATH.exists():
-        try:
-            quick_train()
-        except Exception as e:
-            print(f"Auto-training failed: {e}")
-            return False
-
     if not CHECKPOINT_PATH.exists() or not TOKENIZER_PATH.exists():
-        print("Still no checkpoint after training attempt.")
+        print("No checkpoint found.")
+        print("Free Render tier has only 512MB RAM - auto-training disabled.")
+        print("Train locally: python train/train.py")
+        print("Then commit checkpoints/beq_best.pt + tokenizer.json")
         return False
 
     tokenizer = CharTokenizer.load(TOKENIZER_PATH)
