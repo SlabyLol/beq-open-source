@@ -1,26 +1,48 @@
 #!/usr/bin/env python3
-"""Beq Trainer — complete 9-tab control panel.
+"""Beq Trainer launcher.
 
-Joins beq_trainer_src_0.txt … beq_trainer_src_7.txt and runs the full app.
+The COMPLETE 9-tab trainer is the file:
+  Beq-Trainer-full.py
+
+Upload that file to the repo root (GitHub website → Add file → Upload),
+then run:
+
+  python Beq-Trainer.py
+  # or
+  python Beq-Trainer-full.py
+
+Tabs in the full version:
+  Train | Config & name | Knowledge | Identity | Data | Checkpoints | Generate | Tools | Help
 """
 from __future__ import annotations
 from pathlib import Path
+import runpy
+import sys
 
 _ROOT = Path(__file__).resolve().parent
+_CANDIDATES = [
+    _ROOT / "Beq-Trainer-full.py",
+    _ROOT / "Beq-Trainer-complete.py",
+]
 
 
 def main() -> None:
-    chunks = []
-    for i in range(8):
-        path = _ROOT / f"beq_trainer_src_{i}.txt"
-        if not path.exists():
-            raise SystemExit(
-                f"Missing {path.name}. Re-clone the repo so all beq_trainer_src_*.txt files exist."
-            )
-        chunks.append(path.read_text(encoding="utf-8"))
-    code = "".join(chunks)
-    ns = {"__name__": "__main__", "__file__": str(Path(__file__).resolve())}
-    exec(compile(code, "Beq-Trainer.py", "exec"), ns)
+    for path in _CANDIDATES:
+        if path.exists():
+            sys.argv[0] = str(path)
+            runpy.run_path(str(path), run_name="__main__")
+            return
+    print("=" * 60)
+    print("Beq-Trainer-full.py is missing in this folder.")
+    print()
+    print("1) Download Beq-Trainer-full.py (complete 9-tab UI)")
+    print("2) Put it next to this file in the repo root")
+    print("3) Run:  python Beq-Trainer.py")
+    print()
+    print("Or open the file from your Grok/build artifacts and")
+    print("upload it on GitHub: Add file → Upload files")
+    print("=" * 60)
+    sys.exit(1)
 
 
 if __name__ == "__main__":
