@@ -1,6 +1,7 @@
 """
 Train Beq - Your own language model from scratch.
 Pure PyTorch. No external AI APIs.
+.sbe files are optional and not used during training.
 """
 
 import argparse
@@ -69,10 +70,13 @@ def main():
         print(f"Sample data written to {data_path}")
 
     text = data_path.read_text(encoding="utf-8")
-    extra_path = data_path.parent / "input_extra.txt"
-    if extra_path.exists() and extra_path.resolve() != data_path.resolve():
-        text = text + "\n" + extra_path.read_text(encoding="utf-8")
-        print(f"Also loaded extra data: {extra_path} ({extra_path.stat().st_size} bytes)")
+    # Optional extras (not required): input_extra.txt, input_stories.txt
+    data_dir = data_path.parent
+    for name in ("input_extra.txt", "input_stories.txt"):
+        extra_path = data_dir / name
+        if extra_path.exists() and extra_path.resolve() != data_path.resolve():
+            text = text + "\n" + extra_path.read_text(encoding="utf-8")
+            print(f"Also loaded extra data: {extra_path} ({extra_path.stat().st_size} bytes)")
 
     print(f"Loaded {len(text):,} characters")
 
