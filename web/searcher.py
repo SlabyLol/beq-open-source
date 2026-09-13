@@ -1,8 +1,7 @@
-"""Beq Search — Wikipedia/DDG/store with hard wall-clock timeout."""
+"""Beq Search — Wikipedia/DDG/store, simple and fast."""
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from urllib.parse import quote
 
 try:
@@ -18,8 +17,7 @@ except Exception:
     pass
 
 TIMEOUT = 2.5
-WALL_TIMEOUT = 8.0
-USER_AGENT = "BeqSearchBot/1.6 (+https://beq.onrender.com)"
+USER_AGENT = "BeqSearchBot/1.7 (+https://beq.onrender.com)"
 
 
 def _client():
@@ -79,43 +77,6 @@ def search_wikipedia(query: str) -> dict | None:
                     }
                 except Exception:
                     continue
-            try:
-                s = client.get(
-                    "https://en.wikipedia.org/w/api.php",
-                    params={
-                        "action": "opensearch",
-                        "search": q,
-                        "limit": 1,
-                        "namespace": 0,
-                        "format": "json",
-                    },
-                )
-                if s.status_code != 200:
-                    return None
-                data = s.json()
-                if not (data and len(data) > 1 and data[1]):
-                    return None
-                title = data[1][0]
-                r = client.get(
-                    f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote(title)}"
-                )
-                if r.status_code != 200:
-                    return None
-                d = r.json()
-                extract = (d.get("extract") or "").strip()
-                if len(extract) < 40:
-                    return None
-                return {
-                    "source": "wikipedia",
-                    "title": d.get("title") or title,
-                    "url": (d.get("content_urls") or {})
-                    .get("desktop", {})
-                    .get("page")
-                    or "",
-                    "text": extract[:1600],
-                }
-            except Exception:
-                return None
     except Exception as e:
         print(f"[searcher] wikipedia: {e}")
     return None
@@ -156,99 +117,37 @@ def search_duckduckgo(query: str) -> dict | None:
         return None
 
 
-def search_all(query: str, use_web: bool = True) -> dict:
-    q = (query or "").strip()
-    result = {"query": q, "store": [], "web": None, "crawler_enabled": crawler.is_enabled()}
-    if not q:
-        return result
-    try:
-        result["store"] = crawler.search_store(q, limit=5)
-    except Exception:
-        result["store"] = []
-    if use_web and crawler.is_enabled() and crawler.web_in_chat_enabled():
-        result["web"] = search_wikipedia(q) or search_duckduckgo(q)
-    return result
-
-
-def _looks_like_search(prompt: str) -> bool:
-    p = prompt.strip().lower()
-    if len(p) < 2:
-        return False
-    triggers = (
-        "what is ", "what's ", "who is ", "who's ", "where is ", "when is ",
-        "what are ", "define ", "explain ", "search ", "look up ", "tell me about ",
-        "how does ", "how do ", "why is ", "why are ",
-        "was ist ", "wer ist ", "wo ist ", "erkläre ", "suche ",
-        "capital of", "meaning of",
-    )
-    if any(p.startswith(t) or f" {t}" in f" {p}" for t in triggers):
-        return True
-    if p.endswith("?") and len(p.split()) <= 16:
-        return True
-    if 1 <= len(p.split()) <= 8 and not p.startswith(("hi", "hello", "hey", "thanks")):
-        return True
-    return False
-
-
-def _search_body(prompt: str, use_web: bool) -> str | None:
-    if not crawler.is_enabled():
-        return None
-    if not crawler.auto_search_enabled() and not crawler.web_in_chat_enabled():
-        return None
-
-    always = True
-    try:
-        always = crawler.always_search_enabled()
-    except Exception:
-        always = True
-
-    q = _clean_query(prompt)
-
-    if not always and not _looks_like_search(prompt):
-        try:
-            store_hits = crawler.search_store(q, limit=2)
-            if store_hits and store_hits[0]["score"] >= 0.6:
-                top = store_hits[0]
-                return f"{top['snippet'][:500]}\n\n(Source: crawled {top.get('url') or ''})"
-        except Exception:
-            pass
-        return None
-
-    store_only = not (use_web and crawler.web_in_chat_enabled())
-    parts: list[str] = []
-
-    if not store_only:
-        web = search_wikipedia(q) or search_duckduckgo(q)
-        if web:
-            parts.append(web["text"])
-            if web.get("url"):
-                parts.append(f"(Source: {web.get('source', 'web')} — {web['url']})")
-
-    if not parts:
-        try:
-            store = crawler.search_store(q, limit=3)
-            if store and store[0]["score"] >= 0.3:
-                top = store[0]
-                parts.append(top["snippet"][:500])
-                if top.get("url"):
-                    parts.append(f"(Crawled: {top['url']})")
-        except Exception as e:
-            print(f"[searcher] store: {e}")
-
-    if not parts:
-        return None
-    return "\n".join(parts)[:2000]
-
-
 def try_search_answer(prompt: str, use_web: bool = True) -> str | None:
-    """Never block the chat for more than WALL_TIMEOUT seconds."""
     try:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            fut = pool.submit(_search_body, prompt, use_web)
-            return fut.result(timeout=WALL_TIMEOUT)
-    except FuturesTimeout:
-        print("[searcher] wall timeout — skipping web")
-        return None
+        if not crawler.is_enabled():
+            return None
+        if not crawler.auto_search_enabled() and not crawler.web_in_chat_enabled():
+            return None
+
+        q = _clean_query(prompt)
+        parts: list[str] = []
+
+        if use_web and crawler.web_in_chat_enabled():
+            web = search_wikipedia(q) or search_duckduckgo(q)
+            if web:
+                parts.append(web["text"])
+                if web.get("url"):
+                    parts.append(f"(Source: {web.get('source', 'web')} — {web['url']})")
+
+        if not parts:
+            try:
+                store = crawler.search_store(q, limit=3)
+                if store and store[0]["score"] >= 0.3:
+                    top = store[0]
+                    parts.append(top["snippet"][:500])
+                    if top.get("url"):
+                        parts.append(f"(Crawled: {top['url']})")
+            except Exception:
+                pass
+
+        if not parts:
+            return None
+        return "\n".join(parts)[:2000]
     except Exception as e:
         print(f"[searcher] try_search: {e}")
         return None
