@@ -1,0 +1,32 @@
+# TinyStories-style simple English samples (from public TinyStories dataset)
+# Auto-merged by train/train.py together with input.txt and input_extra.txt
+
+Once upon a time, there was a little girl named Lily. She loved to play outside in the sun. One day she found a shiny stone near a tree. Lily showed the stone to her mom. Her mom said it was beautiful. Lily was happy and kept the stone in her pocket.
+
+One day, a boy named Tim was playing outside. He saw leaves on the ground. Tim's mom asked him to rake the leaves. Tim listened and cleaned the yard with his friends. They all played happily together.
+
+John was sad in his new home. His mother brought him a toy monkey. John hugged his mom and felt happy again. He was no longer lonely.
+
+Once upon a time, there were two good friends, Bob and Jack. They built a castle together. They worked hard and were proud. The moral is that working together is better than working alone.
+
+One day, a little car named Beep loved to go fast in the sun. Beep had good fuel and felt strong. Beep saw falling leaves in the park and smiled.
+
+Tim put on his favorite red vest. He was polite and always said please and thank you. He shared his toys with his friend Sue.
+
+Lily found a needle in her room. It was sharp, so she gave it to her mom to sew a button. Her mom thanked her for being careful.
+
+A little bird wanted to fly higher. He practiced every day. Soon he could fly over the trees. Practice made him stronger.
+
+Sara loved books. She read every night. Her teacher said reading helps you learn new words. Sara smiled and opened another book.
+
+Max the dog ran in the park. He chased a ball and brought it back. His owner said good boy. Max wagged his tail.
+
+The sun rose over the hills. Birds sang. Children walked to school. It was a bright morning.
+
+Anna shared her apple with her friend. Sharing made both of them happy.
+
+Tom learned that water freezes into ice when it is very cold. He made ice cubes in the freezer.
+
+Mia counted to ten. One two three four five six seven eight nine ten. She clapped her hands.
+
+Ben asked, what is two plus two? His sister said four. Ben wrote 2 + 2 = 4 on the paper.
