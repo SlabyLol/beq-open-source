@@ -1,29 +1,25 @@
 """
-Beq Knowledge (.sbe) — STRICT compliance
-=======================================
-Answers come ONLY from configs/*.sbe. When a question matches, the A: text
-is returned EXACTLY as written (no model, no paraphrase).
+Beq Knowledge (.sbe) — OPTIONAL
+===============================
+.sbe files are NOT required to train or run the model.
+Training uses only data/input.txt (+ optional input_extra.txt).
 
-Format:
+When .sbe files exist, they can:
+  1) Store exact FAQ answers (Q: / A:)
+  2) Set display name / about via [identity] or [ai]
+  3) Select base persona: ai=default (normal AI, maybe other name),
+     ai=hilfe, or ai=private
 
-  # comment
-  Q: Who are you?
-  A: I am Beq.
+Example minimal "normal AI, other name":
 
-  # aliases (same answer for several phrasings)
-  Q: What is Beq? | What's Beq? | Explain Beq
-  A: Beq is an open-source pure-PyTorch language model.
+  [ai]
+  ai=default
+  name=DarkFox
+  role=a helpful general-purpose assistant
+  about=I am DarkFox, a normal AI assistant with my own name.
 
-  # multi-line answers (until next Q: or blank section)
-  Q: How do I train?
-  A: 1) Put text in data/input.txt
-     2) Run train/train.py or Beq-Trainer
-     3) Deploy the checkpoint
-
-  [identity]
-  name=Beq
-  role=...
-  about=...
+No Q:/A: pairs required. Without any .sbe files, Beq still runs
+with built-in default mode and the name "Beq".
 """
 
 from __future__ import annotations
@@ -34,7 +30,12 @@ from pathlib import Path
 
 CONFIGS_DIR = Path(__file__).resolve().parents[1] / "configs"
 _CACHE_TTL = 2.0
-_cache: dict = {"loaded_at": 0.0, "entries": [], "mtime": 0.0}
+_cache: dict = {
+    "loaded_at": 0.0,
+    "entries": [],
+    "profile": None,
+    "mtime": 0.0,
+}
 
 _Q_LINE = re.compile(r"^Q:\s*(.+)$", re.I)
 _A_LINE = re.compile(r"^A:\s*(.*)$", re.I)
@@ -46,6 +47,9 @@ _STOP = {
     "or", "in", "on", "for", "please", "can", "you", "me", "my", "your",
     "tell", "say", "just", "hey", "hi", "hello", "ok", "okay",
 }
+
+# Valid ai= values (same keys as web.ai_mode.MODES)
+VALID_AI = {"default", "hilfe", "private"}
 
 
 def _norm(s: str) -> str:
@@ -64,13 +68,25 @@ def _split_aliases(q: str) -> list[str]:
     return parts or [q]
 
 
-def _parse_sbe(text: str) -> list[dict]:
+def _default_profile() -> dict:
+    return {
+        "ai": "default",  # normal general-purpose AI
+        "name": "Beq",
+        "role": "a helpful general-purpose assistant",
+        "about": "I am Beq, a helpful general-purpose assistant.",
+        "has_sbe": False,
+    }
+
+
+def _parse_sbe(text: str) -> tuple[list[dict], dict]:
+    """Return (faq_entries, profile_updates from [ai]/[identity])."""
     entries: list[dict] = []
     pending_qs: list[str] = []
     pending_a_lines: list[str] = []
     collecting_a = False
     section = "faq"
     identity: dict[str, str] = {}
+    ai_block: dict[str, str] = {}
 
     def flush() -> None:
         nonlocal pending_qs, pending_a_lines, collecting_a
@@ -91,8 +107,7 @@ def _parse_sbe(text: str) -> list[dict]:
         collecting_a = False
 
     for raw in text.splitlines():
-        line = raw.rstrip()
-        stripped = line.strip()
+        stripped = raw.strip()
 
         if not stripped or stripped.startswith("#"):
             if collecting_a and not stripped and pending_a_lines:
@@ -106,13 +121,18 @@ def _parse_sbe(text: str) -> list[dict]:
             collecting_a = False
             continue
 
-        if section == "identity":
+        if section in ("identity", "ai"):
             qm = _Q_LINE.match(stripped)
             am = _A_LINE.match(stripped)
             if not (qm or am):
                 km = _KV.match(stripped)
                 if km:
-                    identity[km.group(1).strip().lower()] = km.group(2).strip()
+                    key = km.group(1).strip().lower()
+                    val = km.group(2).strip()
+                    if section == "ai":
+                        ai_block[key] = val
+                    else:
+                        identity[key] = val
                 continue
             section = "faq"
 
@@ -136,19 +156,41 @@ def _parse_sbe(text: str) -> list[dict]:
 
     flush()
 
-    if identity:
-        name = identity.get("name", "Beq")
-        role = identity.get("role", "an open-source language model")
-        about = identity.get("about", f"I am {name}, {role}.")
+    # Merge profile: [ai] wins over [identity] for same keys
+    profile_bits: dict[str, str] = {}
+    profile_bits.update(identity)
+    profile_bits.update(ai_block)
+
+    name = profile_bits.get("name") or profile_bits.get("display_name")
+    role = profile_bits.get("role")
+    about = profile_bits.get("about")
+    ai_mode = (profile_bits.get("ai") or profile_bits.get("mode") or "").strip().lower()
+
+    if name or role or about or ai_mode:
+        resolved_name = name or "Beq"
+        resolved_role = role or "a helpful general-purpose assistant"
+        resolved_about = about or f"I am {resolved_name}, {resolved_role}."
+        if ai_mode not in VALID_AI:
+            ai_mode = "default"
+
         auto = [
-            ("Who are you?", about),
-            ("What are you?", about),
-            ("What is your name?", f"My name is {name}."),
-            ("Who is Beq?", about),
-            ("What is Beq?", about),
-            (f"Who is {name}?", about),
-            (f"What is {name}?", about),
+            ("Who are you?", resolved_about),
+            ("What are you?", resolved_about),
+            ("What is your name?", f"My name is {resolved_name}."),
+            (f"Who is {resolved_name}?", resolved_about),
+            (f"What is {resolved_name}?", resolved_about),
         ]
+        if resolved_name.lower() != "beq":
+            auto.extend([
+                ("Who is Beq?", resolved_about),
+                ("What is Beq?", resolved_about),
+            ])
+        else:
+            auto.extend([
+                ("Who is Beq?", resolved_about),
+                ("What is Beq?", resolved_about),
+            ])
+
         existing = {e["q_norm"] for e in entries}
         for q, a in auto:
             qn = _norm(q)
@@ -163,7 +205,17 @@ def _parse_sbe(text: str) -> list[dict]:
                 "source": "identity",
             })
 
-    return entries
+        profile_update = {
+            "ai": ai_mode or "default",
+            "name": resolved_name,
+            "role": resolved_role,
+            "about": resolved_about,
+            "has_sbe": True,
+        }
+    else:
+        profile_update = {}
+
+    return entries, profile_update
 
 
 def _sbe_files() -> list[Path]:
@@ -172,34 +224,53 @@ def _sbe_files() -> list[Path]:
     return sorted(CONFIGS_DIR.glob("*.sbe"))
 
 
-def _load_entries(force: bool = False) -> list[dict]:
+def _load_all(force: bool = False) -> tuple[list[dict], dict]:
     now = time.monotonic()
     files = _sbe_files()
     mtime = max((f.stat().st_mtime for f in files), default=0.0)
     if (
         not force
-        and _cache["entries"] is not None
+        and _cache["profile"] is not None
         and now - _cache["loaded_at"] < _CACHE_TTL
         and _cache["mtime"] == mtime
     ):
-        return _cache["entries"]
+        return _cache["entries"], _cache["profile"]
 
     entries: list[dict] = []
+    profile = _default_profile()
+
     for path in files:
         try:
-            entries.extend(_parse_sbe(path.read_text(encoding="utf-8")))
+            file_entries, file_profile = _parse_sbe(path.read_text(encoding="utf-8"))
+            entries.extend(file_entries)
+            if file_profile:
+                profile.update(file_profile)
+                profile["has_sbe"] = True
         except Exception as e:
             print(f"[knowledge] failed to load {path.name}: {e}")
 
     entries.sort(key=lambda e: 0 if e.get("source") == "explicit" else 1)
     _cache["entries"] = entries
+    _cache["profile"] = profile
     _cache["loaded_at"] = now
     _cache["mtime"] = mtime
-    return entries
+    return entries, profile
+
+
+def get_sbe_profile() -> dict:
+    """
+    Profile from optional .sbe files.
+
+    Always returns a dict with keys: ai, name, role, about, has_sbe.
+    If no .sbe files exist, has_sbe=False and defaults are used (normal AI named Beq).
+    ai=default means normal general-purpose AI (optionally with another name).
+    """
+    _, profile = _load_all()
+    return dict(profile)
 
 
 def try_knowledge_answer(prompt: str) -> str | None:
-    """Return the EXACT A: text from .sbe if the prompt matches a Q."""
+    """Return EXACT A: text if a Q matches; None if no .sbe or no match (optional)."""
     if not prompt or not prompt.strip():
         return None
 
@@ -209,23 +280,20 @@ def try_knowledge_answer(prompt: str) -> str | None:
     if not qn:
         return None
 
-    entries = _load_entries()
+    entries, _ = _load_all()
     if not entries:
         return None
 
-    # 1) Exact match → verbatim answer
     for e in entries:
         if qn == e["q_norm"]:
             return e["a"]
 
-    # 2) Ignore trailing please/thanks
     qn_stripped = re.sub(r"\b(please|thanks|thank you)\b", "", qn)
     qn_stripped = re.sub(r"\s+", " ", qn_stripped).strip()
     for e in entries:
         if qn_stripped and qn_stripped == e["q_norm"]:
             return e["a"]
 
-    # 3) Full FAQ question contained in prompt
     for e in entries:
         eq = e["q_norm"]
         if len(eq) < 4:
@@ -235,7 +303,6 @@ def try_knowledge_answer(prompt: str) -> str | None:
         if len(qn) >= 3 and qn in eq and len(qn) / max(len(eq), 1) >= 0.5:
             return e["a"]
 
-    # 4) High token recall only (strict)
     q_tokens = _tokens(raw)
     if not q_tokens:
         return None
@@ -265,6 +332,7 @@ def try_knowledge_answer(prompt: str) -> str | None:
 
 
 def list_knowledge() -> list[dict]:
+    entries, _ = _load_all(force=True)
     return [
         {
             "q": e["q"],
@@ -272,5 +340,5 @@ def list_knowledge() -> list[dict]:
             "section": e["section"],
             "source": e.get("source", "explicit"),
         }
-        for e in _load_entries(force=True)
+        for e in entries
     ]
