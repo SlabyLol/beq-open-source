@@ -39,7 +39,7 @@ class Beq:
         api_key: str | None = None,
         *,
         language: str = "en",
-        timeout: float = 60.0,
+        timeout: float = 300.0,
         default_max_tokens: int = 80,
         default_temperature: float = 0.8,
     ):
@@ -50,6 +50,16 @@ class Beq:
         self.default_max_tokens = default_max_tokens
         self.default_temperature = default_temperature
         self._session = requests.Session()
+
+    def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
+        """Send a request and turn network timeouts into a useful SDK error."""
+        try:
+            return self._session.request(method, url, timeout=self.timeout, **kwargs)
+        except requests.Timeout as exc:
+            raise BeqError(
+                f"Request timed out after {self.timeout} seconds. "
+                "The Beq server may be waking up; retry or increase the timeout."
+            ) from exc
 
     def _headers(self) -> dict[str, str]:
         h = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -71,7 +81,7 @@ class Beq:
             raise BeqError(msg or f"HTTP {r.status_code}", r.status_code, body)
 
     def status(self) -> dict[str, Any]:
-        r = self._session.get(f"{self.base_url}/api/status", timeout=self.timeout)
+        r = self._request("GET", f"{self.base_url}/api/status")
         self._raise(r)
         return r.json()
 
@@ -110,11 +120,11 @@ class Beq:
             "max_tokens": max_tokens if max_tokens is not None else self.default_max_tokens,
             "temperature": temperature if temperature is not None else self.default_temperature,
         }
-        r = self._session.post(
+        r = self._request(
+            "POST",
             f"{self.base_url}/api/generate",
             json=payload,
             headers=self._headers(),
-            timeout=self.timeout,
         )
         self._raise(r)
         out = r.json()
