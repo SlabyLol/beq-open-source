@@ -19,6 +19,7 @@
             <a href="/generate">Generate</a>
             <a href="/about">About</a>
             {% if user %}
+                <a href="/api-dashboard">API</a>
                 {% if user.is_admin %}<a href="/admin">Admin</a>{% endif %}
                 <a href="/logout">Logout ({{ user.username }})</a>
             {% else %}
@@ -36,4 +37,4 @@
         <p>Beq is a pure PyTorch language model that runs on your own machine. Mode: {{ ai_mode.label if ai_mode else "Default" }}.</p>
     </footer>
 </body>
-</ht
+</html>
