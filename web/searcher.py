@@ -1,6 +1,5 @@
 """
-Beq Search Tool — crawl store + Wikipedia + DuckDuckGo.
-Respects crawler on/off switches from admin.
+Beq Search Tool — live crawl store + Wikipedia + DuckDuckGo + auto search&crawl.
 """
 
 from __future__ import annotations
@@ -15,8 +14,8 @@ except ImportError:
 
 from web import crawler
 
-TIMEOUT = 8.0
-USER_AGENT = "BeqSearchBot/1.1 (+https://beq.onrender.com)"
+TIMEOUT = 10.0
+USER_AGENT = "BeqSearchBot/1.2 (+https://beq.onrender.com)"
 
 
 def _client():
@@ -51,7 +50,7 @@ def search_wikipedia(query: str) -> dict | None:
                 "source": "wikipedia",
                 "title": data.get("title") or q,
                 "url": (data.get("content_urls") or {}).get("desktop", {}).get("page") or "",
-                "text": extract[:1200],
+                "text": extract[:1500],
             }
     except Exception:
         return None
@@ -80,14 +79,14 @@ def search_duckduckgo(query: str) -> dict | None:
                         break
             if not abstract:
                 return None
-            return {"source": "duckduckgo", "title": heading, "url": url, "text": abstract[:1200]}
+            return {"source": "duckduckgo", "title": heading, "url": url, "text": abstract[:1500]}
     except Exception:
         return None
 
 
 def search_all(query: str, use_web: bool = True) -> dict:
     q = (query or "").strip()
-    result: dict = {"query": q, "store": [], "web": None, "crawler_enabled": crawler.is_enabled()}
+    result: dict = {"query": q, "store": [], "web": None, "crawler_enabled": crawler.is_enabled(), "live_crawl": None}
     if not q:
         return result
     result["store"] = crawler.search_store(q, limit=5)
@@ -103,16 +102,18 @@ def _looks_like_search(prompt: str) -> bool:
     triggers = (
         "what is ", "what's ", "who is ", "who's ", "where is ", "when is ",
         "what are ", "define ", "explain ", "search ", "look up ", "tell me about ",
+        "how does ", "how do ", "why is ", "why are ",
         "was ist ", "wer ist ", "wo ist ", "erkläre ", "suche ",
     )
     if any(p.startswith(t) or f" {t}" in f" {p}" for t in triggers):
         return True
-    if p.endswith("?") and len(p.split()) <= 12:
+    if p.endswith("?") and len(p.split()) <= 14:
         return True
     return False
 
 
 def try_search_answer(prompt: str, use_web: bool = True) -> str | None:
+    """Answer from crawl store + Wikipedia + LIVE search&crawl when needed."""
     if not crawler.is_enabled():
         return None
     if not crawler.auto_search_enabled() and not crawler.web_in_chat_enabled():
@@ -120,45 +121,64 @@ def try_search_answer(prompt: str, use_web: bool = True) -> str | None:
 
     store_only = not (use_web and crawler.web_in_chat_enabled())
 
-    if not _looks_like_search(prompt):
-        store = crawler.search_store(prompt, limit=1)
-        if store and store[0]["score"] >= 0.6:
-            return f"{store[0]['snippet'][:500]}\n\n(Source: crawled {store[0].get('url', '')})"
-        return None
-
     q = prompt.strip()
     q = re.sub(
-        r"^(please\s+)?(search\s+for|look\s+up|tell\s+me\s+about|define|explain|what\s+is|what's|who\s+is|who's)\s+",
+        r"^(please\s+)?(search\s+for|look\s+up|tell\s+me\s+about|define|explain|what\s+is|what's|who\s+is|who's|how\s+does|why\s+is)\s+",
         "",
         q,
         flags=re.I,
     ).strip(" ?")
 
-    found = search_all(q, use_web=not store_only)
+    store_hits = crawler.search_store(prompt if not q else q, limit=3)
+
+    if not _looks_like_search(prompt):
+        if store_hits and store_hits[0]["score"] >= 0.55:
+            top = store_hits[0]
+            title = top.get("title") or ""
+            body = top["snippet"][:500]
+            src = top.get("url") or ""
+            prefix = f"{title}: " if title else ""
+            return f"{prefix}{body}\n\n(Source: crawled {src})"
+        return None
+
+    found = search_all(q or prompt, use_web=not store_only)
     parts: list[str] = []
+
     if found.get("web"):
         w = found["web"]
         parts.append(w["text"])
         if w.get("url"):
             parts.append(f"(Source: {w.get('source', 'web')} — {w['url']})")
+
     if found.get("store"):
         top = found["store"][0]
-        if top["score"] >= 0.35:
-            parts.append(f"From crawl store: {top['snippet'][:350]}")
+        if top["score"] >= 0.3:
+            t = top.get("title") or ""
+            parts.append(f"From crawl store{' — ' + t if t else ''}: {top['snippet'][:400]}")
             if top.get("url"):
                 parts.append(f"(Crawled: {top['url']})")
 
-    # optional: if nothing stored, search-and-crawl then retry store
-    if not parts and crawler.auto_search_enabled() and not store_only:
+    need_live = (not parts) or (found.get("store") and found["store"][0]["score"] < 0.4 and not found.get("web"))
+    if need_live and crawler.auto_search_enabled() and not store_only:
         try:
-            crawler.search_and_crawl(q, max_pages=2)
-            again = crawler.search_store(q, limit=1)
+            live = crawler.search_and_crawl(q or prompt, max_pages=3)
+            found["live_crawl"] = {
+                "crawled_ok": live.get("crawled_ok"),
+                "links": live.get("links_found", [])[:5],
+            }
+            again = crawler.search_store(q or prompt, limit=2)
             if again:
-                parts.append(again[0]["snippet"][:500])
-                parts.append(f"(Crawled live for: {q})")
-        except Exception:
-            pass
+                top = again[0]
+                t = top.get("title") or ""
+                parts.append(f"{t + ': ' if t else ''}{top['snippet'][:500]}")
+                parts.append(f"(Live crawled for: {q or prompt})")
+            for r in (live.get("results") or [])[:2]:
+                if r.get("ok") and r.get("preview") and not again:
+                    parts.append(r["preview"][:400])
+                    parts.append(f"(Crawled: {r.get('url')})")
+        except Exception as e:
+            print(f"[searcher] live crawl: {e}")
 
     if not parts:
         return None
-    return "\n".join(parts)[:1500]
+    return "\n".join(parts)[:1800]

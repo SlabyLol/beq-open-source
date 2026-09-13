@@ -40,36 +40,31 @@ def register(app, *, require_admin, templates, ctx, repo_root, train_log_path, t
         log_tail = ""
         if train_log_path.exists():
             log_tail = "\n".join(train_log_path.read_text(encoding="utf-8", errors="ignore").splitlines()[-40:])
-        return templates.TemplateResponse(
-            request=request,
-            name="admin.html",
-            context=ctx(
-                request,
-                modes=ai_mode.MODES,
-                data_stats=data_stats,
-                training_running=training_running,
-                log_tail=log_tail,
-                checkpoint_exists=checkpoint_path.exists(),
-                users=auth.list_users(),
-                unlimited_value=auth.UNLIMITED,
-                weekly_default=auth.WEEKLY_TOKEN_LIMIT,
-                my_trace=getattr(request.state, "trace_id", None),
-                crawl_docs=crawler.list_docs(limit=20),
-                crawl_status=crawler.status(),
-                crawl_message=crawl_message,
-            ),
-        )
+        users = auth.list_users()
+        crawl_docs = crawler.list_docs(limit=20)
+        crawl_status = crawler.status()
+        return templates.TemplateResponse(request, "admin.html", ctx(
+            request,
+            modes=ai_mode.MODES,
+            data_stats=data_stats,
+            training_running=training_running,
+            log_tail=log_tail,
+            checkpoint_exists=checkpoint_path.exists(),
+            users=users,
+            unlimited_value=auth.UNLIMITED,
+            weekly_default=auth.WEEKLY_TOKEN_LIMIT,
+            crawl_docs=crawl_docs,
+            crawl_status=crawl_status,
+            crawl_message=crawl_message,
+        ))
 
     @app.post("/admin/crawl/search")
     async def admin_crawl_search(request: Request, q: str = Form(...)):
         user = require_admin(request)
         if user is None:
             return RedirectResponse("/login", status_code=303)
-        result = crawler.search_and_crawl(q, max_pages=3)
-        msg = (
-            f"Search '{q}': links={len(result.get('links_found') or [])}, "
-            f"crawled_ok={result.get('crawled_ok')}"
-        )
+        result = crawler.search_and_crawl(q, max_pages=4)
+        msg = f"Search+crawl '{q}': {result.get('crawled_ok', 0)} pages ok, links={len(result.get('links_found') or [])}"
         return _admin_page(request, crawl_message=msg)
 
     @app.post("/admin/crawl/random")
@@ -77,8 +72,8 @@ def register(app, *, require_admin, templates, ctx, repo_root, train_log_path, t
         user = require_admin(request)
         if user is None:
             return RedirectResponse("/login", status_code=303)
-        result = crawler.random_crawl(n=2)
-        msg = f"Random crawl ok={result.get('crawled_ok')}"
+        result = crawler.random_crawl(3)
+        msg = f"Random crawl: {result.get('crawled_ok', 0)} pages ok"
         return _admin_page(request, crawl_message=msg)
 
     @app.post("/admin/crawl")
@@ -86,6 +81,9 @@ def register(app, *, require_admin, templates, ctx, repo_root, train_log_path, t
         user = require_admin(request)
         if user is None:
             return RedirectResponse("/login", status_code=303)
-        result = crawler.crawl_url(url)
-        msg = f"Crawl {url}: {result}"
+        result = crawler.crawl_url(url, follow_links=2)
+        if result.get("ok"):
+            msg = f"Crawled {result.get('chars')} chars from {url} (followed {len(result.get('followed') or [])} links)"
+        else:
+            msg = f"Crawl failed: {result.get('error')}"
         return _admin_page(request, crawl_message=msg)
