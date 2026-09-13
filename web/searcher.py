@@ -113,11 +113,20 @@ def _looks_like_search(prompt: str) -> bool:
 
 
 def try_search_answer(prompt: str, use_web: bool = True) -> str | None:
-    """Answer from crawl store + Wikipedia + LIVE search&crawl when needed."""
+    """Answer from crawl store + Wikipedia + LIVE search&crawl.
+
+    When always_search is ON: every message triggers search (again and again).
+    """
     if not crawler.is_enabled():
         return None
     if not crawler.auto_search_enabled() and not crawler.web_in_chat_enabled():
         return None
+
+    always = False
+    try:
+        always = crawler.always_search_enabled()
+    except Exception:
+        always = True
 
     store_only = not (use_web and crawler.web_in_chat_enabled())
 
@@ -128,10 +137,13 @@ def try_search_answer(prompt: str, use_web: bool = True) -> str | None:
         q,
         flags=re.I,
     ).strip(" ?")
+    if not q:
+        q = prompt.strip()
 
-    store_hits = crawler.search_store(prompt if not q else q, limit=3)
+    store_hits = crawler.search_store(q, limit=3)
 
-    if not _looks_like_search(prompt):
+    # Gate: only skip search for non-question chatter unless always_search ON
+    if not always and not _looks_like_search(prompt):
         if store_hits and store_hits[0]["score"] >= 0.55:
             top = store_hits[0]
             title = top.get("title") or ""
@@ -158,8 +170,8 @@ def try_search_answer(prompt: str, use_web: bool = True) -> str | None:
             if top.get("url"):
                 parts.append(f"(Crawled: {top['url']})")
 
-    # Live crawl only when we have nothing useful yet (avoid long request timeouts)
-    need_live = not parts
+    # Live crawl when empty, or when always_search and results weak
+    need_live = (not parts) or (always and not found.get("web") and not (found.get("store") and found["store"][0]["score"] >= 0.5))
     if need_live and crawler.auto_search_enabled() and not store_only:
         try:
             live = crawler.search_and_crawl(q or prompt, max_pages=2)

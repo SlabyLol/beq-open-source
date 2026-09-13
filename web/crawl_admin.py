@@ -17,6 +17,7 @@ def register(app, *, require_admin, templates, ctx, repo_root, train_log_path, t
         enabled: str = Form(None),
         web_in_chat: str = Form(None),
         auto_search: str = Form(None),
+        always_search: str = Form(None),
     ):
         user = require_admin(request)
         if user is None:
@@ -24,6 +25,8 @@ def register(app, *, require_admin, templates, ctx, repo_root, train_log_path, t
         crawler.set_enabled(enabled is not None)
         crawler.set_web_in_chat(web_in_chat is not None)
         crawler.set_auto_search(auto_search is not None)
+        if hasattr(crawler, "set_always_search"):
+            crawler.set_always_search(always_search is not None)
         return RedirectResponse("/admin", status_code=303)
 
     def _admin_page(request: Request, crawl_message=None):
@@ -81,9 +84,9 @@ def register(app, *, require_admin, templates, ctx, repo_root, train_log_path, t
         user = require_admin(request)
         if user is None:
             return RedirectResponse("/login", status_code=303)
-        result = crawler.crawl_url(url, follow_links=2)
+        result = crawler.crawl_url(url, follow_links=2) if "follow_links" in crawler.crawl_url.__code__.co_varnames else crawler.crawl_url(url)
         if result.get("ok"):
-            msg = f"Crawled {result.get('chars')} chars from {url} (followed {len(result.get('followed') or [])} links)"
+            msg = f"Crawled {result.get('chars')} chars from {url}"
         else:
             msg = f"Crawl failed: {result.get('error')}"
         return _admin_page(request, crawl_message=msg)

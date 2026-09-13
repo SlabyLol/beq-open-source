@@ -27,22 +27,27 @@
 <section class="chat-box">
     <h3 style="margin-bottom:1rem;">🕷️ Crawler (real web crawl)</h3>
     <p style="margin-bottom:0.6rem; color:var(--muted);">
-        Stores pages in the database (Neon/Postgres via DATABASE_URL on Render) so knowledge survives restarts.
-        Web search uses DuckDuckGo result pages (Google-style queries). Google itself blocks most bots.
+        Stores pages in the database (Neon/Postgres). Web search uses DuckDuckGo.
+        <strong>Immer suchen</strong> = every chat message searches again.
     </p>
     <p style="margin-bottom:0.8rem;">
         Status:
         <strong>{{ "ON" if crawl_status.enabled else "OFF" }}</strong>
         · Web in chat: <strong>{{ "ON" if crawl_status.web_in_chat else "OFF" }}</strong>
         · Auto search+crawl: <strong>{{ "ON" if crawl_status.auto_search else "OFF" }}</strong>
-        · Docs (sample): <strong>{{ crawl_status.doc_count_sample }}</strong>
+        · <span style="color:{% if crawl_status.always_search %}#3ddc84{% else %}#f66{% endif %}">Immer suchen: <strong>{{ "ON" if crawl_status.always_search else "OFF" }}</strong></span>
+        · Docs: <strong>{{ crawl_status.doc_count_sample }}</strong>
         · DB: <strong>{{ "Postgres/Neon" if crawl_status.using_postgres else "SQLite/file" }}</strong>
     </p>
 
     <form action="/admin/crawl/settings" method="post" style="display:flex; flex-wrap:wrap; gap:1rem; align-items:center; margin-bottom:1.2rem;">
         <label><input type="checkbox" name="enabled" value="1" {% if crawl_status.enabled %}checked{% endif %}> Crawler ON</label>
         <label><input type="checkbox" name="web_in_chat" value="1" {% if crawl_status.web_in_chat %}checked{% endif %}> Use web in chat answers</label>
-        <label><input type="checkbox" name="auto_search" value="1" {% if crawl_status.auto_search %}checked{% endif %}> Auto search+crawl on questions</label>
+        <label><input type="checkbox" name="auto_search" value="1" {% if crawl_status.auto_search %}checked{% endif %}> Auto search+crawl</label>
+        <label style="padding:0.4rem 0.7rem; border:2px solid {% if crawl_status.always_search %}#3ddc84{% else %}#666{% endif %}; border-radius:8px; background:{% if crawl_status.always_search %}rgba(61,220,132,0.15){% else %}transparent{% endif %};">
+            <input type="checkbox" name="always_search" value="1" {% if crawl_status.always_search %}checked{% endif %}>
+            <strong>Immer suchen</strong> (jede Nachricht, immer wieder)
+        </label>
         <button type="submit" class="btn-primary">Save crawler switches</button>
     </form>
 
@@ -121,12 +126,5 @@
         <li>Data file size: <strong>{{ data_stats.size_bytes }}</strong> bytes</li>
         <li>Training running: <strong>{{ "yes" if training_running else "no" }}</strong></li>
     </ul>
-    <form action="/admin/train" method="post" style="margin-top:1rem;">
-        <button type="submit" class="btn-primary" {% if training_running %}disabled{% endif %}>
-            {% if training_running %}Training running…{% else %}Start training now{% endif %}
-        </button>
-    </form>
-    <h3 style="margin-top:1.5rem;">Last training log lines</h3>
-    <pre style="white-space:pre-wrap; font-size:0.8rem; max-height:240px; overflow:auto;">{{ log_tail or "(empty)" }}</pre>
 </section>
 {% endblock %}
