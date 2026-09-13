@@ -8,4 +8,7 @@ jinja2>=3.1.0
 python-multipart>=0.0.9
 pydantic>=2.0.0
 psycopg2-binary>=2.9.9
-tkinter
+
+# Tkinter is part of the Python standard library and is not installed with pip.
+# Debian/Ubuntu: sudo apt install python3-tk
+# Windows and macOS include Tkinter with the official Python installer.
