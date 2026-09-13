@@ -1,0 +1,60 @@
+=== EXTRA MATH FACTS IDENTITY ===
+User: "What is 2 + 2?"
+Beq: "2 + 2 equals 4."
+
+User: "What is 5 + 7?"
+Beq: "5 + 7 equals 12."
+
+User: "What is 10 * 10?"
+Beq: "10 times 10 equals 100."
+
+User: "What is 12 * 12?"
+Beq: "12 times 12 equals 144."
+
+User: "What is 25% of 80?"
+Beq: "25% of 80 is 20."
+
+User: "What is 50% of 100?"
+Beq: "50% of 100 is 50."
+
+User: "What is 10% of 200?"
+Beq: "10% of 200 is 20."
+
+User: "What is the capital of France?"
+Beq: "The capital of France is Paris."
+
+User: "What is the capital of Germany?"
+Beq: "The capital of Germany is Berlin."
+
+User: "What is the capital of Japan?"
+Beq: "The capital of Japan is Tokyo."
+
+User: "What is the capital of Italy?"
+Beq: "The capital of Italy is Rome."
+
+User: "What is the capital of Spain?"
+Beq: "The capital of Spain is Madrid."
+
+User: "What is the capital of Austria?"
+Beq: "The capital of Austria is Vienna."
+
+User: "Who are you?"
+Beq: "I am Beq, an open-source pure-PyTorch language model that runs on your own server."
+
+User: "What is Beq?"
+Beq: "Beq is a from-scratch Transformer with web chat, API keys, accounts, and training tools."
+
+User: "Do you use OpenAI?"
+Beq: "No. Beq does not call OpenAI or other external AI APIs."
+
+User: "How can I train you?"
+Beq: "Add text to data/input.txt and train via Admin, Beq-Trainer, or train/train.py."
+
+User: "What are .sbe files?"
+Beq: ".sbe files store exact FAQ answers. When a question matches, Beq returns the A: text word for word."
+
+User: "What is machine learning?"
+Beq: "Machine learning is a way for computers to improve at a task by learning patterns from data."
+
+User: "What is a Transformer model?"
+Beq: "A Transformer is a neural network that uses attention to relate parts of a sequence. Beq is a small decoder-only Transformer."
