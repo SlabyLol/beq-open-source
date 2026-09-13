@@ -1,18 +1,11 @@
 """
-Beq Auth + Token Quotas + Device Trace Tracking
-Supports SQLite (default) or Postgres via DATABASE_URL (Neon / Supabase / Render).
+Beq Auth + Token Quotas + API Keys + Device Trace
+Postgres via DATABASE_URL (Neon) or SQLite fallback.
 
-Token limits per user:
-    token_limit is NULL   -> uses the global WEEKLY_TOKEN_LIMIT
-    token_limit is a number (>= 0) -> that user's personal weekly limit
-    token_limit is -1     -> unlimited ("inf") for that user
-
-Device trace tracking:
-    Every browser gets a long-lived `beq_trace` cookie (set in web/app.py).
-    Whenever that browser logs in, we record which account used it in the
-    `trace_links` table, so the admin can see "this device has been used by
-    accounts X, Y, Z" — useful for spotting alt accounts / quota abuse, and
-    lets Beq recognize a returning device even across logins.
+Limits:
+  - Normal users: WEEKLY_TOKEN_LIMIT tokens/week, max MAX_API_KEYS API keys
+  - Admin/owner: unlimited tokens, unlimited API keys
+  - token_limit NULL = global default, -1 = inf, N = custom
 """
 
 from __future__ import annotations
@@ -25,11 +18,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 WEEKLY_TOKEN_LIMIT = 5000
+MAX_API_KEYS = 10
 ADMIN_USERNAME = "admin"
 DB_PATH = Path(__file__).resolve().parents[1] / "data" / "beq_users.db"
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-
-UNLIMITED = -1  # sentinel stored in users.token_limit for "inf"
+UNLIMITED = -1
 
 
 def _is_postgres() -> bool:
@@ -96,20 +89,37 @@ def init_db():
                 last_seen TEXT NOT NULL,
                 PRIMARY KEY (trace_id, user_id)
             )""")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                key_hash TEXT UNIQUE NOT NULL,
+                key_prefix TEXT NOT NULL,
+                name TEXT DEFAULT 'default',
+                created_at TEXT NOT NULL,
+                last_used TEXT,
+                revoked INTEGER DEFAULT 0
+            )""")
         conn.commit()
         cur.execute("SELECT id FROM users WHERE username = %s", (ADMIN_USERNAME,))
         if cur.fetchone() is None:
             now = _now()
             cur.execute(
                 "INSERT INTO users (username, email, password_hash, is_admin, tokens_used, token_limit, week_start, created_at) "
-                "VALUES (%s,%s,%s,1,0,NULL,%s,%s)",
-                (ADMIN_USERNAME, "admin@beq.local", _hash("admin123"), now, now),
+                "VALUES (%s,%s,%s,1,0,%s,%s,%s)",
+                (ADMIN_USERNAME, "admin@beq.local", _hash("admin123"), UNLIMITED, now, now),
             )
             conn.commit()
-            print("Created default admin: admin / admin123 — CHANGE IT!")
+            print("Created default admin: admin / admin123 (unlimited) — CHANGE IT!")
+        else:
+            cur.execute(
+                "UPDATE users SET is_admin = 1, token_limit = %s WHERE username = %s",
+                (UNLIMITED, ADMIN_USERNAME),
+            )
+            conn.commit()
         cur.close()
         conn.close()
-        print("Auth DB: Postgres (DATABASE_URL)")
+        print("Auth DB: Postgres/Neon (DATABASE_URL)")
         return
 
     with _sqlite_conn() as c:
@@ -128,7 +138,7 @@ def init_db():
         try:
             c.execute("ALTER TABLE users ADD COLUMN token_limit INTEGER")
         except sqlite3.OperationalError:
-            pass  # already exists
+            pass
         c.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 token TEXT PRIMARY KEY,
@@ -145,18 +155,36 @@ def init_db():
                 PRIMARY KEY (trace_id, user_id),
                 FOREIGN KEY (user_id) REFERENCES users(id)
             )""")
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                key_hash TEXT UNIQUE NOT NULL,
+                key_prefix TEXT NOT NULL,
+                name TEXT DEFAULT 'default',
+                created_at TEXT NOT NULL,
+                last_used TEXT,
+                revoked INTEGER DEFAULT 0,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )""")
         c.commit()
         row = c.execute("SELECT id FROM users WHERE username = ?", (ADMIN_USERNAME,)).fetchone()
         if not row:
             now = _now()
             c.execute(
                 "INSERT INTO users (username, email, password_hash, is_admin, tokens_used, token_limit, week_start, created_at) "
-                "VALUES (?,?,?,1,0,NULL,?,?)",
-                (ADMIN_USERNAME, "admin@beq.local", _hash("admin123"), now, now),
+                "VALUES (?,?,?,1,0,?,?,?)",
+                (ADMIN_USERNAME, "admin@beq.local", _hash("admin123"), UNLIMITED, now, now),
             )
             c.commit()
-            print("Created default admin: admin / admin123 — CHANGE IT!")
-    print("Auth DB: SQLite (set DATABASE_URL for Neon/Supabase)")
+            print("Created default admin: admin / admin123 (unlimited) — CHANGE IT!")
+        else:
+            c.execute(
+                "UPDATE users SET is_admin = 1, token_limit = ? WHERE username = ?",
+                (UNLIMITED, ADMIN_USERNAME),
+            )
+            c.commit()
+    print("Auth DB: SQLite (set DATABASE_URL for Neon)")
 
 
 def register(username: str, email: str, password: str) -> tuple[bool, str]:
@@ -196,7 +224,6 @@ def register(username: str, email: str, password: str) -> tuple[bool, str]:
 
 
 def link_trace(trace_id: str | None, user_id: int) -> None:
-    """Record that this browser (trace_id) has logged into this account."""
     if not trace_id:
         return
     now = _now()
@@ -224,7 +251,6 @@ def link_trace(trace_id: str | None, user_id: int) -> None:
 
 
 def accounts_for_trace(trace_id: str | None) -> list[str]:
-    """Which usernames have logged in from this browser before? (admin visibility)"""
     if not trace_id:
         return []
     if _is_postgres():
@@ -277,7 +303,8 @@ def login(username_or_email: str, password: str, trace_id: str | None = None) ->
         expires = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
         c.execute("INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)", (token, row["id"], expires))
         c.commit()
-    link_trace(trace_id, row["id"])
+        uid = row["id"]
+    link_trace(trace_id, uid)
     return True, token, "OK"
 
 
@@ -343,8 +370,27 @@ def get_user(session_token: str | None) -> dict | None:
         return user
 
 
+def get_user_by_id(user_id: int) -> dict | None:
+    if _is_postgres():
+        conn = _pg_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, username, email, is_admin, tokens_used, token_limit, week_start FROM users WHERE id = %s",
+            (user_id,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if not row:
+            return None
+        return {"id": row[0], "username": row[1], "email": row[2], "is_admin": row[3],
+                "tokens_used": row[4], "token_limit": row[5], "week_start": row[6]}
+    with _sqlite_conn() as c:
+        row = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+
 def _effective_limit(user: dict) -> int | None:
-    """Returns the user's weekly limit, or None if unlimited."""
     if user.get("is_admin"):
         return None
     limit = user.get("token_limit")
@@ -368,6 +414,8 @@ def can_use_tokens(user: dict, amount: int) -> tuple[bool, str]:
     if limit is None:
         return True, "unlimited"
     left = tokens_remaining(user)
+    if left is None:
+        return True, "unlimited"
     if amount > left:
         return False, f"Weekly limit reached ({limit}). Remaining: {left}"
     return True, "ok"
@@ -386,11 +434,6 @@ def consume_tokens(user_id: int, amount: int):
         c.execute("UPDATE users SET tokens_used = tokens_used + ? WHERE id = ?", (amount, user_id))
         c.commit()
 
-
-# ---------------------------------------------------------------------------
-# Admin user management: list users, set a per-user token limit ("inf" or a
-# number), reset a user's usage counter (fresh tokens now), delete accounts.
-# ---------------------------------------------------------------------------
 
 def list_users() -> list[dict]:
     if _is_postgres():
@@ -414,7 +457,6 @@ def list_users() -> list[dict]:
 
 
 def set_token_limit(user_id: int, limit_str: str) -> tuple[bool, str]:
-    """limit_str is what the admin typed: a non-negative integer, or 'inf'."""
     limit_str = limit_str.strip().lower()
     if limit_str in ("inf", "infinite", "unlimited", "∞"):
         value = UNLIMITED
@@ -425,7 +467,6 @@ def set_token_limit(user_id: int, limit_str: str) -> tuple[bool, str]:
                 return False, "Limit must be 0 or higher (or 'inf')."
         except ValueError:
             return False, "Enter a whole number or 'inf'."
-
     if _is_postgres():
         conn = _pg_conn()
         cur = conn.cursor()
@@ -442,7 +483,6 @@ def set_token_limit(user_id: int, limit_str: str) -> tuple[bool, str]:
 
 
 def reset_usage(user_id: int) -> None:
-    """Give the user a fresh quota right now (resets tokens_used to 0)."""
     if _is_postgres():
         conn = _pg_conn()
         cur = conn.cursor()
@@ -472,6 +512,7 @@ def delete_user(user_id: int) -> tuple[bool, str]:
             return False, "Refusing to delete the built-in admin account"
         cur.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
         cur.execute("DELETE FROM trace_links WHERE user_id = %s", (user_id,))
+        cur.execute("DELETE FROM api_keys WHERE user_id = %s", (user_id,))
         cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
         conn.commit()
         cur.close()
@@ -485,6 +526,134 @@ def delete_user(user_id: int) -> tuple[bool, str]:
             return False, "Refusing to delete the built-in admin account"
         c.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
         c.execute("DELETE FROM trace_links WHERE user_id = ?", (user_id,))
+        c.execute("DELETE FROM api_keys WHERE user_id = ?", (user_id,))
         c.execute("DELETE FROM users WHERE id = ?", (user_id,))
         c.commit()
         return True, "User deleted"
+
+
+def _hash_api_key(raw: str) -> str:
+    return hashlib.sha256(f"beq-api:{raw}".encode()).hexdigest()
+
+
+def create_api_key(user: dict, name: str = "default") -> tuple[bool, str, str | None]:
+    is_admin = bool(user.get("is_admin"))
+    if not is_admin:
+        keys = list_api_keys(user["id"])
+        active = [k for k in keys if not k.get("revoked")]
+        if len(active) >= MAX_API_KEYS:
+            return False, f"Max {MAX_API_KEYS} API keys. Revoke one first.", None
+    raw = "beq_" + secrets.token_urlsafe(32)
+    key_hash = _hash_api_key(raw)
+    prefix = raw[:10]
+    now = _now()
+    if _is_postgres():
+        conn = _pg_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO api_keys (user_id, key_hash, key_prefix, name, created_at, revoked) VALUES (%s,%s,%s,%s,%s,0)",
+            (user["id"], key_hash, prefix, name[:64], now),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    else:
+        with _sqlite_conn() as c:
+            c.execute(
+                "INSERT INTO api_keys (user_id, key_hash, key_prefix, name, created_at, revoked) VALUES (?,?,?,?,?,0)",
+                (user["id"], key_hash, prefix, name[:64], now),
+            )
+            c.commit()
+    return True, "API key created — copy it now, it will not be shown again.", raw
+
+
+def list_api_keys(user_id: int) -> list[dict]:
+    if _is_postgres():
+        conn = _pg_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, key_prefix, name, created_at, last_used, revoked FROM api_keys WHERE user_id = %s ORDER BY id",
+            (user_id,),
+        )
+        cols = ["id", "key_prefix", "name", "created_at", "last_used", "revoked"]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return rows
+    with _sqlite_conn() as c:
+        rows = c.execute(
+            "SELECT id, key_prefix, name, created_at, last_used, revoked FROM api_keys WHERE user_id = ? ORDER BY id",
+            (user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def revoke_api_key(user_id: int, key_id: int) -> tuple[bool, str]:
+    if _is_postgres():
+        conn = _pg_conn()
+        cur = conn.cursor()
+        cur.execute("UPDATE api_keys SET revoked = 1 WHERE id = %s AND user_id = %s", (key_id, user_id))
+        n = cur.rowcount
+        conn.commit()
+        cur.close()
+        conn.close()
+        return (True, "Revoked") if n else (False, "Key not found")
+    with _sqlite_conn() as c:
+        cur = c.execute("UPDATE api_keys SET revoked = 1 WHERE id = ? AND user_id = ?", (key_id, user_id))
+        c.commit()
+        return (True, "Revoked") if cur.rowcount else (False, "Key not found")
+
+
+def user_from_api_key(raw_key: str | None) -> dict | None:
+    if not raw_key:
+        return None
+    raw_key = raw_key.strip()
+    if raw_key.lower().startswith("bearer "):
+        raw_key = raw_key[7:].strip()
+    h = _hash_api_key(raw_key)
+    if _is_postgres():
+        conn = _pg_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT u.id, u.username, u.email, u.is_admin, u.tokens_used, u.token_limit, u.week_start, k.id
+               FROM api_keys k JOIN users u ON u.id = k.user_id
+               WHERE k.key_hash = %s AND k.revoked = 0""",
+            (h,),
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            conn.close()
+            return None
+        cur.execute("UPDATE api_keys SET last_used = %s WHERE id = %s", (_now(), row[7]))
+        conn.commit()
+        user = {"id": row[0], "username": row[1], "email": row[2], "is_admin": row[3],
+                "tokens_used": row[4], "token_limit": row[5], "week_start": row[6]}
+        current_week = _week_start_iso()
+        if user["week_start"][:10] != current_week[:10]:
+            cur.execute("UPDATE users SET tokens_used = 0, week_start = %s WHERE id = %s", (current_week, user["id"]))
+            conn.commit()
+            user["tokens_used"] = 0
+            user["week_start"] = current_week
+        cur.close()
+        conn.close()
+        return user
+    with _sqlite_conn() as c:
+        row = c.execute(
+            """SELECT u.*, k.id as key_id FROM api_keys k JOIN users u ON u.id = k.user_id
+               WHERE k.key_hash = ? AND k.revoked = 0""",
+            (h,),
+        ).fetchone()
+        if not row:
+            return None
+        c.execute("UPDATE api_keys SET last_used = ? WHERE id = ?", (_now(), row["key_id"]))
+        c.commit()
+        user = dict(row)
+        user.pop("key_id", None)
+        current_week = _week_start_iso()
+        if user["week_start"][:10] != current_week[:10]:
+            c.execute("UPDATE users SET tokens_used = 0, week_start = ? WHERE id = ?", (current_week, user["id"]))
+            c.commit()
+            user["tokens_used"] = 0
+            user["week_start"] = current_week
+        return user
