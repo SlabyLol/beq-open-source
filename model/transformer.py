@@ -153,14 +153,29 @@ class BeqTransformer(nn.Module):
         max_new_tokens: int = 100,
         temperature: float = 1.0,
         top_k: int | None = None,
+        repetition_penalty: float = 1.3,
     ) -> torch.Tensor:
-        """Autoregressive generation."""
+        """
+        Autoregressive generation. repetition_penalty > 1.0 divides the
+        logits of tokens already seen in the sequence so far, making the
+        model less likely to loop on the same fragments. This is a purely
+        mechanical fix for repetitive/looping output — it does NOT make a
+        small character-level model understand grammar, facts, or math it
+        was never trained on. That needs a bigger, more diverse training
+        corpus (see README).
+        """
         for _ in range(max_new_tokens):
             # Crop to max_seq_len
             idx_cond = idx[:, -self.max_seq_len :]
 
             logits, _ = self(idx_cond)
             logits = logits[:, -1, :] / temperature
+
+            if repetition_penalty and repetition_penalty != 1.0:
+                for b in range(idx.size(0)):
+                    seen = torch.unique(idx[b])
+                    sel = logits[b, seen]
+                    logits[b, seen] = torch.where(sel < 0, sel * repetition_penalty, sel / repetition_penalty)
 
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
