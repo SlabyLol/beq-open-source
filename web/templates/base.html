@@ -3,19 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Beq{% endblock %} – Open Source AI</title>
+    <title>{% block title %}Beq{% endblock %} – Your own AI</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <nav class="navbar">
         <div class="nav-brand">
             <a href="/">Beq</a>
+            {% if ai_mode %}
+            <span class="mode-badge mode-{{ ai_mode.key }}" title="{{ ai_mode.description }}">{{ ai_mode.badge }}</span>
+            {% endif %}
         </div>
         <div class="nav-links">
             <a href="/">Chat</a>
             <a href="/generate">Generate</a>
             <a href="/about">About</a>
-            <a href="https://github.com/SlabyLol/beq-open-source" target="_blank">GitHub</a>
+            {% if user %}
+                {% if user.is_admin %}<a href="/admin">Admin</a>{% endif %}
+                <a href="/logout">Logout ({{ user.username }})</a>
+            {% else %}
+                <a href="/login">Login</a>
+                <a href="/register">Register</a>
+            {% endif %}
         </div>
     </nav>
 
@@ -24,7 +33,7 @@
     </main>
 
     <footer class="footer">
-        <p>Beq is a pure PyTorch language model. No external AI APIs. Fully open source.</p>
+        <p>Beq is a pure PyTorch language model that runs on your own machine. Mode: {{ ai_mode.label if ai_mode else "Default" }}.</p>
     </footer>
 </body>
-</html>
+</ht
