@@ -70,10 +70,11 @@ TRACE_MAX_AGE = 400 * 24 * 3600  # ~400 days (browser max for long-lived cookies
 async def ensure_trace_cookie(request: Request, call_next):
     """
     Give every browser a long-lived, random trace id (separate from the
-    login session cookie). Lets Beq recognize a returning device even across
-    logins/logouts, and lets the admin see which accounts used which device
-    (web/auth.py: link_trace / accounts_for_trace). Just a random id — no
-    personal data, no permissions by itself.
+    login session cookie). This lets Beq recognize a returning device even
+    across logins/logouts, and lets the admin see which accounts have used
+    which device (web/auth.py: link_trace / accounts_for_trace).
+    It's just a random id — no personal data, and it carries no permissions
+    by itself (you still need to log in to do anything).
     """
     trace_id = request.cookies.get(TRACE_COOKIE)
     new_trace = trace_id is None
@@ -292,8 +293,8 @@ async def api_generate(request: Request, req: GenerateRequest):
 
 
 # ---------------------------------------------------------------------------
-# Admin panel: mode switching, user/token management, training controls.
-# Only ever usable by the admin account (see web/auth.py, is_admin).
+# Admin panel: mode switching (AI.txt) + training controls.
+# Only ever shown/usable to the admin account (see web/auth.py, is_admin).
 # ---------------------------------------------------------------------------
 
 def _require_admin(request: Request):
@@ -377,6 +378,42 @@ async def admin_delete_user(request: Request, user_id: int):
     return RedirectResponse("/admin", status_code=303)
 
 
+def _load_training_args() -> list[str]:
+    """
+    Build the actual CLI flags train/train.py understands, sourced from
+    configs/default.yaml. train.py itself has no --config flag (it only
+    takes individual --flags), so we translate the yaml here.
+    """
+    config_path = REPO_ROOT / "configs" / "default.yaml"
+    args = []
+    try:
+        import yaml
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception as e:
+        print(f"[admin_train] could not read configs/default.yaml ({e}); using train.py defaults")
+        return args
+
+    model_cfg = cfg.get("model", {})
+    train_cfg = cfg.get("training", {})
+
+    def add(flag, value):
+        if value is not None:
+            args.extend([flag, str(value)])
+
+    add("--data", train_cfg.get("data_path"))
+    add("--out_dir", train_cfg.get("out_dir"))
+    add("--d_model", model_cfg.get("d_model"))
+    add("--n_layers", model_cfg.get("n_layers"))
+    add("--n_heads", model_cfg.get("n_heads"))
+    add("--block_size", model_cfg.get("block_size"))
+    add("--batch_size", train_cfg.get("batch_size"))
+    add("--lr", train_cfg.get("learning_rate"))
+    add("--max_steps", train_cfg.get("max_steps"))
+    add("--eval_interval", train_cfg.get("eval_interval"))
+    add("--save_interval", train_cfg.get("save_interval"))
+    return args
+
+
 @app.post("/admin/train")
 async def admin_start_training(request: Request):
     user = _require_admin(request)
@@ -387,9 +424,9 @@ async def admin_start_training(request: Request):
     if proc is None or proc.poll() is not None:
         TRAIN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         log_file = open(TRAIN_LOG_PATH, "w", encoding="utf-8")
+        cmd = [sys.executable, str(REPO_ROOT / "train" / "train.py")] + _load_training_args()
         _training_state["process"] = subprocess.Popen(
-            [sys.executable, str(REPO_ROOT / "train" / "train.py"),
-             "--config", str(REPO_ROOT / "configs" / "default.yaml")],
+            cmd,
             cwd=str(REPO_ROOT),
             stdout=log_file,
             stderr=subprocess.STDOUT,
@@ -400,13 +437,17 @@ async def admin_start_training(request: Request):
 # ---------------------------------------------------------------------------
 # Config / integration API.
 #
-# For embedding Beq into other things (a dashboard, a bot, a CI step) —
-# separate from normal user login. Protected by BEQ_API_KEY, sent as:
+# This is meant for embedding Beq into other things (a dashboard, a bot,
+# a CI step, whatever) — separate from normal user login. Protected by
+# BEQ_API_KEY (set as an environment variable), sent as:
 #   Authorization: Bearer <BEQ_API_KEY>
 #
 # On Render: Dashboard -> your service -> Environment -> Add:
 #   BEQ_API_KEY   = <a long random secret you generate>
-#   DATABASE_URL  = <your Postgres connection string>
+#   DATABASE_URL  = <your Postgres connection string>   (Render Postgres,
+#                   Neon, Supabase, ...) — without this, mode changes are
+#                   only written to configs/AI.txt, which Render resets on
+#                   every redeploy.
 # ---------------------------------------------------------------------------
 
 def _check_api_key(authorization: str | None) -> None:
