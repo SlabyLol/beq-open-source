@@ -1,6 +1,18 @@
 """
-Beq Auth + Token Quotas
+Beq Auth + Token Quotas + Device Trace Tracking
 Supports SQLite (default) or Postgres via DATABASE_URL (Neon / Supabase / Render).
+
+Token limits per user:
+    token_limit is NULL   -> uses the global WEEKLY_TOKEN_LIMIT
+    token_limit is a number (>= 0) -> that user's personal weekly limit
+    token_limit is -1     -> unlimited ("inf") for that user
+
+Device trace tracking:
+    Every browser gets a long-lived `beq_trace` cookie (set in web/app.py).
+    Whenever that browser logs in, we record which account used it in the
+    `trace_links` table, so the admin can see "this device has been used by
+    accounts X, Y, Z" — useful for spotting alt accounts / quota abuse, and
+    lets Beq recognize a returning device even across logins.
 """
 
 from __future__ import annotations
@@ -16,6 +28,8 @@ WEEKLY_TOKEN_LIMIT = 5000
 ADMIN_USERNAME = "admin"
 DB_PATH = Path(__file__).resolve().parents[1] / "data" / "beq_users.db"
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+
+UNLIMITED = -1  # sentinel stored in users.token_limit for "inf"
 
 
 def _is_postgres() -> bool:
@@ -63,21 +77,32 @@ def init_db():
                 password_hash TEXT NOT NULL,
                 is_admin INTEGER DEFAULT 0,
                 tokens_used INTEGER DEFAULT 0,
+                token_limit INTEGER,
                 week_start TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )""")
+        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS token_limit INTEGER")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 token TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL REFERENCES users(id),
                 expires_at TEXT NOT NULL
             )""")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS trace_links (
+                trace_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                PRIMARY KEY (trace_id, user_id)
+            )""")
         conn.commit()
         cur.execute("SELECT id FROM users WHERE username = %s", (ADMIN_USERNAME,))
         if cur.fetchone() is None:
             now = _now()
             cur.execute(
-                "INSERT INTO users (username, email, password_hash, is_admin, tokens_used, week_start, created_at) VALUES (%s,%s,%s,1,0,%s,%s)",
+                "INSERT INTO users (username, email, password_hash, is_admin, tokens_used, token_limit, week_start, created_at) "
+                "VALUES (%s,%s,%s,1,0,NULL,%s,%s)",
                 (ADMIN_USERNAME, "admin@beq.local", _hash("admin123"), now, now),
             )
             conn.commit()
@@ -96,9 +121,14 @@ def init_db():
                 password_hash TEXT NOT NULL,
                 is_admin INTEGER DEFAULT 0,
                 tokens_used INTEGER DEFAULT 0,
+                token_limit INTEGER,
                 week_start TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )""")
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN token_limit INTEGER")
+        except sqlite3.OperationalError:
+            pass  # already exists
         c.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 token TEXT PRIMARY KEY,
@@ -106,12 +136,22 @@ def init_db():
                 expires_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id)
             )""")
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS trace_links (
+                trace_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                PRIMARY KEY (trace_id, user_id),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )""")
         c.commit()
         row = c.execute("SELECT id FROM users WHERE username = ?", (ADMIN_USERNAME,)).fetchone()
         if not row:
             now = _now()
             c.execute(
-                "INSERT INTO users (username, email, password_hash, is_admin, tokens_used, week_start, created_at) VALUES (?,?,?,1,0,?,?)",
+                "INSERT INTO users (username, email, password_hash, is_admin, tokens_used, token_limit, week_start, created_at) "
+                "VALUES (?,?,?,1,0,NULL,?,?)",
                 (ADMIN_USERNAME, "admin@beq.local", _hash("admin123"), now, now),
             )
             c.commit()
@@ -133,7 +173,8 @@ def register(username: str, email: str, password: str) -> tuple[bool, str]:
             conn = _pg_conn()
             cur = conn.cursor()
             cur.execute(
-                "INSERT INTO users (username, email, password_hash, is_admin, tokens_used, week_start, created_at) VALUES (%s,%s,%s,0,0,%s,%s)",
+                "INSERT INTO users (username, email, password_hash, is_admin, tokens_used, token_limit, week_start, created_at) "
+                "VALUES (%s,%s,%s,0,0,NULL,%s,%s)",
                 (username, email, _hash(password), _week_start_iso(), _now()),
             )
             conn.commit()
@@ -142,7 +183,8 @@ def register(username: str, email: str, password: str) -> tuple[bool, str]:
         else:
             with _sqlite_conn() as c:
                 c.execute(
-                    "INSERT INTO users (username, email, password_hash, is_admin, tokens_used, week_start, created_at) VALUES (?,?,?,0,0,?,?)",
+                    "INSERT INTO users (username, email, password_hash, is_admin, tokens_used, token_limit, week_start, created_at) "
+                    "VALUES (?,?,?,0,0,NULL,?,?)",
                     (username, email, _hash(password), _week_start_iso(), _now()),
                 )
                 c.commit()
@@ -153,7 +195,60 @@ def register(username: str, email: str, password: str) -> tuple[bool, str]:
         return False, str(e)
 
 
-def login(username_or_email: str, password: str) -> tuple[bool, str | None, str]:
+def link_trace(trace_id: str | None, user_id: int) -> None:
+    """Record that this browser (trace_id) has logged into this account."""
+    if not trace_id:
+        return
+    now = _now()
+    if _is_postgres():
+        conn = _pg_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO trace_links (trace_id, user_id, first_seen, last_seen)
+               VALUES (%s, %s, %s, %s)
+               ON CONFLICT (trace_id, user_id) DO UPDATE SET last_seen = EXCLUDED.last_seen""",
+            (trace_id, user_id, now, now),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        return
+    with _sqlite_conn() as c:
+        c.execute(
+            """INSERT INTO trace_links (trace_id, user_id, first_seen, last_seen)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(trace_id, user_id) DO UPDATE SET last_seen = excluded.last_seen""",
+            (trace_id, user_id, now, now),
+        )
+        c.commit()
+
+
+def accounts_for_trace(trace_id: str | None) -> list[str]:
+    """Which usernames have logged in from this browser before? (admin visibility)"""
+    if not trace_id:
+        return []
+    if _is_postgres():
+        conn = _pg_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT u.username FROM trace_links t JOIN users u ON u.id = t.user_id
+               WHERE t.trace_id = %s ORDER BY t.last_seen DESC""",
+            (trace_id,),
+        )
+        rows = [r[0] for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return rows
+    with _sqlite_conn() as c:
+        rows = c.execute(
+            """SELECT u.username FROM trace_links t JOIN users u ON u.id = t.user_id
+               WHERE t.trace_id = ? ORDER BY t.last_seen DESC""",
+            (trace_id,),
+        ).fetchall()
+        return [r["username"] for r in rows]
+
+
+def login(username_or_email: str, password: str, trace_id: str | None = None) -> tuple[bool, str | None, str]:
     key = username_or_email.strip().lower()
     pw = _hash(password)
     if _is_postgres():
@@ -165,12 +260,14 @@ def login(username_or_email: str, password: str) -> tuple[bool, str | None, str]
             cur.close()
             conn.close()
             return False, None, "Invalid login"
+        user_id = row[0]
         token = secrets.token_urlsafe(32)
         expires = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
-        cur.execute("INSERT INTO sessions (token, user_id, expires_at) VALUES (%s,%s,%s)", (token, row[0], expires))
+        cur.execute("INSERT INTO sessions (token, user_id, expires_at) VALUES (%s,%s,%s)", (token, user_id, expires))
         conn.commit()
         cur.close()
         conn.close()
+        link_trace(trace_id, user_id)
         return True, token, "OK"
     with _sqlite_conn() as c:
         row = c.execute("SELECT * FROM users WHERE username = ? OR email = ?", (key, key)).fetchone()
@@ -180,7 +277,8 @@ def login(username_or_email: str, password: str) -> tuple[bool, str | None, str]
         expires = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
         c.execute("INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)", (token, row["id"], expires))
         c.commit()
-        return True, token, "OK"
+    link_trace(trace_id, row["id"])
+    return True, token, "OK"
 
 
 def logout(session_token: str | None):
@@ -206,7 +304,7 @@ def get_user(session_token: str | None) -> dict | None:
         conn = _pg_conn()
         cur = conn.cursor()
         cur.execute(
-            """SELECT u.id, u.username, u.email, u.is_admin, u.tokens_used, u.week_start
+            """SELECT u.id, u.username, u.email, u.is_admin, u.tokens_used, u.token_limit, u.week_start
                FROM users u JOIN sessions s ON s.user_id = u.id
                WHERE s.token = %s AND s.expires_at > %s""",
             (session_token, _now()),
@@ -216,7 +314,8 @@ def get_user(session_token: str | None) -> dict | None:
             cur.close()
             conn.close()
             return None
-        user = {"id": row[0], "username": row[1], "email": row[2], "is_admin": row[3], "tokens_used": row[4], "week_start": row[5]}
+        user = {"id": row[0], "username": row[1], "email": row[2], "is_admin": row[3],
+                "tokens_used": row[4], "token_limit": row[5], "week_start": row[6]}
         current_week = _week_start_iso()
         if user["week_start"][:10] != current_week[:10]:
             cur.execute("UPDATE users SET tokens_used = 0, week_start = %s WHERE id = %s", (current_week, user["id"]))
@@ -244,18 +343,33 @@ def get_user(session_token: str | None) -> dict | None:
         return user
 
 
-def tokens_remaining(user: dict) -> int | None:
+def _effective_limit(user: dict) -> int | None:
+    """Returns the user's weekly limit, or None if unlimited."""
     if user.get("is_admin"):
         return None
-    return max(0, WEEKLY_TOKEN_LIMIT - int(user.get("tokens_used", 0)))
+    limit = user.get("token_limit")
+    if limit is None:
+        return WEEKLY_TOKEN_LIMIT
+    limit = int(limit)
+    if limit == UNLIMITED:
+        return None
+    return limit
+
+
+def tokens_remaining(user: dict) -> int | None:
+    limit = _effective_limit(user)
+    if limit is None:
+        return None
+    return max(0, limit - int(user.get("tokens_used", 0)))
 
 
 def can_use_tokens(user: dict, amount: int) -> tuple[bool, str]:
-    if user.get("is_admin"):
-        return True, "admin"
+    limit = _effective_limit(user)
+    if limit is None:
+        return True, "unlimited"
     left = tokens_remaining(user)
-    if left is not None and amount > left:
-        return False, f"Weekly limit reached ({WEEKLY_TOKEN_LIMIT}). Remaining: {left}"
+    if amount > left:
+        return False, f"Weekly limit reached ({limit}). Remaining: {left}"
     return True, "ok"
 
 
@@ -271,3 +385,106 @@ def consume_tokens(user_id: int, amount: int):
     with _sqlite_conn() as c:
         c.execute("UPDATE users SET tokens_used = tokens_used + ? WHERE id = ?", (amount, user_id))
         c.commit()
+
+
+# ---------------------------------------------------------------------------
+# Admin user management: list users, set a per-user token limit ("inf" or a
+# number), reset a user's usage counter (fresh tokens now), delete accounts.
+# ---------------------------------------------------------------------------
+
+def list_users() -> list[dict]:
+    if _is_postgres():
+        conn = _pg_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT id, username, email, is_admin, tokens_used, token_limit, created_at
+               FROM users ORDER BY created_at ASC"""
+        )
+        cols = ["id", "username", "email", "is_admin", "tokens_used", "token_limit", "created_at"]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return rows
+    with _sqlite_conn() as c:
+        rows = c.execute(
+            """SELECT id, username, email, is_admin, tokens_used, token_limit, created_at
+               FROM users ORDER BY created_at ASC"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def set_token_limit(user_id: int, limit_str: str) -> tuple[bool, str]:
+    """limit_str is what the admin typed: a non-negative integer, or 'inf'."""
+    limit_str = limit_str.strip().lower()
+    if limit_str in ("inf", "infinite", "unlimited", "∞"):
+        value = UNLIMITED
+    else:
+        try:
+            value = int(limit_str)
+            if value < 0:
+                return False, "Limit must be 0 or higher (or 'inf')."
+        except ValueError:
+            return False, "Enter a whole number or 'inf'."
+
+    if _is_postgres():
+        conn = _pg_conn()
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET token_limit = %s WHERE id = %s", (value, user_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+    else:
+        with _sqlite_conn() as c:
+            c.execute("UPDATE users SET token_limit = ? WHERE id = ?", (value, user_id))
+            c.commit()
+    label = "unlimited" if value == UNLIMITED else str(value)
+    return True, f"Token limit set to {label}"
+
+
+def reset_usage(user_id: int) -> None:
+    """Give the user a fresh quota right now (resets tokens_used to 0)."""
+    if _is_postgres():
+        conn = _pg_conn()
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET tokens_used = 0 WHERE id = %s", (user_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return
+    with _sqlite_conn() as c:
+        c.execute("UPDATE users SET tokens_used = 0 WHERE id = ?", (user_id,))
+        c.commit()
+
+
+def delete_user(user_id: int) -> tuple[bool, str]:
+    if _is_postgres():
+        conn = _pg_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            conn.close()
+            return False, "User not found"
+        if row[0] == ADMIN_USERNAME:
+            cur.close()
+            conn.close()
+            return False, "Refusing to delete the built-in admin account"
+        cur.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+        cur.execute("DELETE FROM trace_links WHERE user_id = %s", (user_id,))
+        cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True, "User deleted"
+    with _sqlite_conn() as c:
+        row = c.execute("SELECT username FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row:
+            return False, "User not found"
+        if row["username"] == ADMIN_USERNAME:
+            return False, "Refusing to delete the built-in admin account"
+        c.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        c.execute("DELETE FROM trace_links WHERE user_id = ?", (user_id,))
+        c.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        c.commit()
+        return True, "User deleted"
