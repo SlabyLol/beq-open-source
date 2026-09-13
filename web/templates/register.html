@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Register{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <h1>Create account</h1>
+    <p class="subtitle">Get your own weekly token quota to chat with Beq.</p>
+</section>
+
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+{% if success %}<div class="alert alert-warning">{{ success }}</div>{% endif %}
+
+<section class="chat-box">
+    <form action="/register" method="post" class="chat-form">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" minlength="3" required>
+
+        <label for="email" style="margin-top:1rem;">Email</label>
+        <input type="email" id="email" name="email" required>
+
+        <label for="password" style="margin-top:1rem;">Password</label>
+        <input type="password" id="password" name="password" minlength="6" required>
+
+        <div class="controls">
+            <button type="submit" class="btn-primary">Create account</button>
+        </div>
+    </form>
+</section>
+
+<p class="subtitle">Already have an account? <a href="/login">Log in</a>.</p>
+{% endblock %}
