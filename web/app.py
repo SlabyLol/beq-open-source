@@ -127,6 +127,20 @@ def _is_admin(user: dict | None) -> bool:
     return bool(user and user.get("is_admin"))
 
 
+def _api_dashboard_ctx(request: Request, **extra):
+    user = _user(request)
+    keys = auth.list_api_keys(user["id"]) if user else []
+    active_count = sum(1 for k in keys if not k.get("revoked"))
+    max_keys = None if (user and user.get("is_admin")) else auth.MAX_API_KEYS
+    return _ctx(
+        request,
+        keys=keys,
+        active_count=active_count,
+        max_keys=max_keys,
+        **extra,
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse(request=request, name="index.html", context=_ctx(request))
@@ -140,6 +154,54 @@ async def about(request: Request):
 @app.get("/generate", response_class=HTMLResponse)
 async def generate_page(request: Request):
     return templates.TemplateResponse(request=request, name="generate.html", context=_ctx(request))
+
+
+@app.get("/api-dashboard", response_class=HTMLResponse)
+async def api_dashboard(request: Request):
+    user = _user(request)
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    return templates.TemplateResponse(
+        request=request,
+        name="api.html",
+        context=_api_dashboard_ctx(request),
+    )
+
+
+@app.post("/api-dashboard/create")
+async def api_dashboard_create(request: Request, name: str = Form("default")):
+    user = _user(request)
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    ok, msg, raw = auth.create_api_key(user, name=name)
+    if not ok:
+        return templates.TemplateResponse(
+            request=request,
+            name="api.html",
+            context=_api_dashboard_ctx(request, flash_error=msg),
+        )
+    return templates.TemplateResponse(
+        request=request,
+        name="api.html",
+        context=_api_dashboard_ctx(request, flash_success=msg, new_key=raw),
+    )
+
+
+@app.post("/api-dashboard/revoke/{key_id}")
+async def api_dashboard_revoke(request: Request, key_id: int):
+    user = _user(request)
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    ok, msg = auth.revoke_api_key(user["id"], key_id)
+    return templates.TemplateResponse(
+        request=request,
+        name="api.html",
+        context=_api_dashboard_ctx(
+            request,
+            flash_success=msg if ok else None,
+            flash_error=None if ok else msg,
+        ),
+    )
 
 
 @app.get("/login", response_class=HTMLResponse)
