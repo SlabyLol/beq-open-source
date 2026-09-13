@@ -158,10 +158,11 @@ def try_search_answer(prompt: str, use_web: bool = True) -> str | None:
             if top.get("url"):
                 parts.append(f"(Crawled: {top['url']})")
 
-    need_live = (not parts) or (found.get("store") and found["store"][0]["score"] < 0.4 and not found.get("web"))
+    # Live crawl only when we have nothing useful yet (avoid long request timeouts)
+    need_live = not parts
     if need_live and crawler.auto_search_enabled() and not store_only:
         try:
-            live = crawler.search_and_crawl(q or prompt, max_pages=3)
+            live = crawler.search_and_crawl(q or prompt, max_pages=2)
             found["live_crawl"] = {
                 "crawled_ok": live.get("crawled_ok"),
                 "links": live.get("links_found", [])[:5],
