@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from model import BeqTransformer, CharTokenizer
 from web import ai_mode, auth, crawler, settings_store
-# Hard alias so home/chat never AttributeError
+# Hard aliases — prevent AttributeError on session lookup
 if not hasattr(auth, "user_from_session") and hasattr(auth, "get_user"):
     auth.user_from_session = auth.get_user
 if not hasattr(auth, "check_and_consume"):
@@ -41,7 +41,22 @@ from web import crawl_admin
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEVICE = "cpu"
-CHECKPOINT = REPO_ROOT / "checkpoints" / "beq_latest.pt"
+
+
+def _resolve_checkpoint() -> Path:
+    """Prefer beq_latest, then best/final — whatever exists in the repo."""
+    candidates = [
+        REPO_ROOT / "checkpoints" / "beq_latest.pt",
+        REPO_ROOT / "checkpoints" / "beq_best.pt",
+        REPO_ROOT / "checkpoints" / "beq_final.pt",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[0]
+
+
+CHECKPOINT = _resolve_checkpoint()
 TRAIN_LOG = REPO_ROOT / "data" / "train.log"
 
 LANGUAGE_PREFIXES = {
@@ -65,12 +80,14 @@ training_state = {"process": None}
 
 
 def load_model():
-    global model, tokenizer
+    global model, tokenizer, CHECKPOINT
     try:
+        CHECKPOINT = _resolve_checkpoint()
         if not CHECKPOINT.exists():
-            print("[load_model] no checkpoint")
+            print(f"[load_model] no checkpoint at {CHECKPOINT} (tried latest/best/final)")
             model = tokenizer = None
             return
+        print(f"[load_model] loading {CHECKPOINT}")
         ckpt = torch.load(CHECKPOINT, map_location=DEVICE, weights_only=False)
         config = ckpt.get("config") or {}
         chars = ckpt.get("chars") or ckpt.get("vocab") or ""
@@ -85,7 +102,7 @@ def load_model():
         )
         model.load_state_dict(ckpt["model"])
         model.eval()
-        print(f"Beq loaded | params={sum(p.numel() for p in model.parameters()):,}")
+        print(f"Beq loaded | params={sum(p.numel() for p in model.parameters()):,} | file={CHECKPOINT.name}")
     except Exception as e:
         print(f"[load_model] {e}")
         model = tokenizer = None
@@ -359,7 +376,7 @@ async def chat(
     error = None
     answer = None
     if not mode_cfg.get("public_chat", True) and not _is_admin(user):
-        error = "Chat is restricted."
+        error = "Chat is restricted. Switch AI mode to Default in /admin (not Private)."
     elif (
         model is None
         and try_math_answer(prompt) is None
@@ -399,7 +416,7 @@ async def api_generate(
     user = _user_from_request(request, authorization)
     mode_cfg = ai_mode.get_mode_config()
     if not mode_cfg.get("public_chat", True) and not _is_admin(user):
-        return JSONResponse({"error": "not public"}, status_code=403)
+        return JSONResponse({"error": "not public — set AI mode to Default in /admin"}, status_code=403)
     if (
         model is None
         and try_math_answer(req.prompt) is None
@@ -429,6 +446,7 @@ async def status():
     return {
         "ok": True,
         "model_loaded": model is not None,
+        "checkpoint": str(CHECKPOINT.name) if CHECKPOINT.exists() else None,
         "mode": ai_mode.get_mode_config().get("key", "default"),
         "crawl": crawler.status(),
         "data_bytes": data_path.stat().st_size if data_path.exists() else 0,
