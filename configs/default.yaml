@@ -1,0 +1,17 @@
+name: beq-default
+display_name: Beq
+
+model:
+  d_model: 256
+  n_layers: 6
+  n_heads: 8
+  block_size: 128
+
+training:
+  data_path: data/input.txt
+  out_dir: checkpoints
+  batch_size: 32
+  learning_rate: 0.0003
+  max_steps: 5000
+  eval_interval: 250
+  save_interval: 1000
