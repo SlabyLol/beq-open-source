@@ -31,8 +31,8 @@
 <section class="chat-box">
     <h3 style="margin-bottom:1rem;">Accounts & Tokens</h3>
     <p class="subtitle" style="margin-bottom:1rem;">
-        Standard-Limit: {{ weekly_default }} Tokens/Woche. Setze pro Account eine eigene Zahl oder <code>inf</code> für unbegrenzt.
-        Dein Gerät (Trace) ist bereits mit <strong>{{ my_trace[:12] }}…</strong> hinterlegt.
+        Default limit: {{ weekly_default }} tokens/week. Set a custom number per account or <code>inf</code> for unlimited.
+        Your device (trace) is linked as <strong>{{ my_trace[:12] }}…</strong>.
     </p>
     <div style="overflow-x:auto;">
     <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
@@ -41,9 +41,9 @@
                 <th style="padding:0.5rem;">User</th>
                 <th style="padding:0.5rem;">Email</th>
                 <th style="padding:0.5rem;">Admin</th>
-                <th style="padding:0.5rem;">Verbraucht</th>
+                <th style="padding:0.5rem;">Used</th>
                 <th style="padding:0.5rem;">Limit</th>
-                <th style="padding:0.5rem;">Aktionen</th>
+                <th style="padding:0.5rem;">Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -51,25 +51,34 @@
             <tr style="border-bottom:1px solid var(--border);">
                 <td style="padding:0.5rem;">{{ u.username }}</td>
                 <td style="padding:0.5rem; color:var(--text-muted);">{{ u.email }}</td>
-                <td style="padding:0.5rem;">{{ "ja" if u.is_admin else "nein" }}</td>
+                <td style="padding:0.5rem;">{{ "yes" if u.is_admin else "no" }}</td>
                 <td style="padding:0.5rem;">{{ u.tokens_used }}</td>
                 <td style="padding:0.5rem;">
                     {% if u.token_limit == unlimited_value %}∞
-                    {% elif u.token_limit is none %}{{ weekly_default }} (Standard)
+                    {% elif u.token_limit is none %}{{ weekly_default }} (default)
                     {% else %}{{ u.token_limit }}{% endif %}
                 </td>
                 <td style="padding:0.5rem;">
                     <form action="/admin/users/{{ u.id }}/limit" method="post" style="display:inline-flex; gap:0.3rem;">
-                        <input type="text" name="limit" placeholder="z.B. 5000 oder inf" style="width:120px; padding:0.3rem 0.5rem; font-size:0.85rem;">
-                        <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0; font-size:0.8rem;">Setzen</button>
+                        <input type="text" name="limit" placeholder="e.g. 5000 or inf" style="width:120px; padding:0.3rem 0.5rem; font-size:0.85rem;">
+                        <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0; font-size:0.8rem;">Set limit</button>
                     </form>
                     <form action="/admin/users/{{ u.id }}/reset" method="post" style="display:inline;">
                         <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0 0 0 0.3rem; font-size:0.8rem; background:var(--surface-2); color:var(--text);">Reset</button>
                     </form>
                     {% if u.username != "admin" %}
+                    <form action="/admin/users/{{ u.id }}/admin" method="post" style="display:inline;">
+                        {% if u.is_admin %}
+                        <input type="hidden" name="is_admin" value="0">
+                        <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0 0 0 0.3rem; font-size:0.8rem; background:var(--surface-2); color:var(--text);">Remove admin</button>
+                        {% else %}
+                        <input type="hidden" name="is_admin" value="1">
+                        <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0 0 0 0.3rem; font-size:0.8rem;">Make admin</button>
+                        {% endif %}
+                    </form>
                     <form action="/admin/users/{{ u.id }}/delete" method="post" style="display:inline;"
-                          onsubmit="return confirm('Account {{ u.username }} wirklich löschen?');">
-                        <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0 0 0 0.3rem; font-size:0.8rem; background:var(--error);">Löschen</button>
+                          onsubmit="return confirm('Really delete account {{ u.username }}?');">
+                        <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0 0 0 0.3rem; font-size:0.8rem; background:var(--error);">Delete</button>
                     </form>
                     {% endif %}
                 </td>
