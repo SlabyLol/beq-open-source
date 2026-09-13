@@ -262,46 +262,64 @@ def _is_identity_fluff(text: str) -> bool:
         "i run as your own",
     )
     hits = sum(1 for m in markers if m in t)
-    if hits >= 1 and len(t) < 220:
+    if hits >= 1 and len(t) < 280:
         return True
     if hits >= 2:
         return True
     return False
 
 
+def _is_identity_question(prompt: str) -> bool:
+    p = (prompt or "").strip().lower()
+    keys = (
+        "who are you", "what are you", "what is your name", "what's your name",
+        "who is beq", "what is beq", "your name",
+    )
+    return any(k in p for k in keys)
+
+
 def _answer(prompt, max_tokens, temperature, preamble):
-    """Knowledge → math → web search → model (reject identity echo)."""
+    """Knowledge → math → web search → model. Never answer facts with identity fluff."""
     know = try_knowledge_answer(prompt)
-    if know and not (_is_identity_fluff(know) and len((prompt or "").split()) > 4):
-        return prompt, know
+    if know:
+        # Accept knowledge always unless it is pure identity fluff on a non-identity question
+        if not _is_identity_fluff(know) or _is_identity_question(prompt):
+            return prompt, know
+
     math_answer = try_math_answer(prompt)
     if math_answer:
         return prompt, math_answer
+
     search_answer = try_search_answer(prompt, use_web=True)
     if search_answer and not _is_identity_fluff(search_answer):
         return prompt, search_answer
+
     if model is None or tokenizer is None:
         if search_answer:
             return prompt, search_answer
+        if know and _is_identity_question(prompt):
+            return prompt, know
         return prompt, (
-            "I could not load the model and web search returned nothing. "
-            "Try again, or ask the admin to crawl a page / check Crawler ON."
+            "I could not find an answer. Try a clearer question "
+            '(e.g. "What is the Sun?") or turn Crawler / Immer suchen ON in admin.'
         )
+
     full_prompt, full = _generate(prompt, max_tokens, temperature, preamble)
     completion = full[len(full_prompt) :] if full.startswith(full_prompt) else full
     completion = _clean_completion(completion)
-    if _is_identity_fluff(completion) or (
-        prompt.strip().lower() in completion.lower() and len(completion) < len(prompt) + 30
-    ):
-        search_answer = try_search_answer(prompt, use_web=True)
+
+    if _is_identity_fluff(completion) and not _is_identity_question(prompt):
         if search_answer:
             return prompt, search_answer
-        if _is_identity_fluff(completion):
-            return prompt, (
-                "I am Beq. For factual questions I search the web — "
-                "no result this time. Try e.g. What is the Sun? "
-                "or turn Immer suchen ON in admin."
-            )
+        # one more search try (fast path)
+        again = try_search_answer(prompt, use_web=True)
+        if again and not _is_identity_fluff(again):
+            return prompt, again
+        return prompt, (
+            "I don't have a solid answer for that yet. "
+            "Try rephrasing, or ask the admin to add a Q/A in knowledge.sbe / crawl a page."
+        )
+
     return full_prompt, completion
 
 
