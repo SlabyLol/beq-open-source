@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from model import BeqTransformer, CharTokenizer
 from web import ai_mode, auth, settings_store
+from web.mathtool import try_math_answer
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TRAIN_LOG_PATH = REPO_ROOT / "checkpoints" / "train.log"
@@ -259,6 +260,7 @@ async def logout(request: Request):
 
 
 def _generate(prompt: str, max_tokens: int, temperature: float, preamble: str = "") -> tuple[str, str]:
+    """Generate a continuation. Returns (full_prompt_used, full_decoded_text)."""
     full_prompt = f"{preamble}{prompt}"
     ids = tokenizer.encode(full_prompt)
     if not ids:
@@ -268,10 +270,39 @@ def _generate(prompt: str, max_tokens: int, temperature: float, preamble: str = 
         out = model.generate(
             idx,
             max_new_tokens=min(max_tokens, 200),
-            temperature=max(0.1, min(temperature, 1.5)),
-            top_k=40,
+            temperature=max(0.5, min(temperature, 1.1)),
+            top_k=30,
+            repetition_penalty=1.3,
         )
     return full_prompt, tokenizer.decode(out[0].tolist())
+
+
+def _clean_completion(text: str) -> str:
+    """
+    Cosmetic cleanup only — cuts off after the model starts hallucinating a
+    fake back-and-forth (a "User:" line) or rambles into a second paragraph.
+    Does not and cannot fix incoherent wording; that's a training-data/model
+    size problem, not a string-processing one.
+    """
+    for marker in ("\nUser:", "\nuser:", "\n\n"):
+        idx = text.find(marker)
+        if idx != -1:
+            text = text[:idx]
+    return text.strip()
+
+
+def _answer(prompt: str, max_tokens: int, temperature: float, preamble: str) -> tuple[str, str]:
+    """
+    Try the safe arithmetic shortcut first (see web/mathtool.py); only fall
+    through to the language model if the prompt isn't a plain math
+    expression. Returns (full_prompt_used, completion_text).
+    """
+    math_answer = try_math_answer(prompt)
+    if math_answer is not None:
+        return prompt, math_answer
+    full_prompt, full = _generate(prompt, max_tokens, temperature, preamble)
+    completion = full[len(full_prompt):] if full.startswith(full_prompt) else full
+    return full_prompt, _clean_completion(completion)
 
 
 @app.post("/chat", response_class=HTMLResponse)
@@ -297,12 +328,11 @@ async def chat(
         if not ok:
             error = msg
         else:
-            full_prompt, full = _generate(prompt, max_tokens, temperature, mode_cfg["preamble"])
-            completion = full[len(full_prompt):] if full.startswith(full_prompt) else full
+            full_prompt, completion = _answer(prompt, max_tokens, temperature, mode_cfg["preamble"])
             used = min(max_tokens, max(1, len(completion)))
             auth.consume_tokens(user["id"], used)
             user = auth.get_user(_session(request))
-            result = {"prompt": prompt, "completion": completion, "full": full}
+            result = {"prompt": prompt, "completion": completion, "full": full_prompt + completion}
 
     return templates.TemplateResponse(
         request=request,
@@ -327,24 +357,24 @@ async def api_generate(request: Request, req: GenerateRequest, authorization: st
             {"error": f"Beq is in '{mode_cfg['label']}' mode and not public right now."},
             status_code=403,
         )
-    if model is None or tokenizer is None:
-        return JSONResponse({"error": "Model not loaded"}, status_code=503)
     if user is None:
         return JSONResponse(
             {"error": "Auth required. Login cookie or Authorization: Bearer beq_... API key."},
             status_code=401,
         )
+    math_answer = try_math_answer(req.prompt)
+    if math_answer is None and (model is None or tokenizer is None):
+        return JSONResponse({"error": "Model not loaded"}, status_code=503)
     ok, msg = auth.can_use_tokens(user, req.max_tokens)
     if not ok:
         return JSONResponse({"error": msg}, status_code=429)
-    full_prompt, full = _generate(req.prompt, req.max_tokens, req.temperature, mode_cfg["preamble"])
-    new_text = full[len(full_prompt):] if full.startswith(full_prompt) else full
+    full_prompt, new_text = _answer(req.prompt, req.max_tokens, req.temperature, mode_cfg["preamble"])
     used = min(req.max_tokens, max(1, len(new_text)))
     auth.consume_tokens(user["id"], used)
     refreshed = auth.get_user_by_id(user["id"]) or user
     return {
         "prompt": req.prompt,
-        "generated": full,
+        "generated": full_prompt + new_text,
         "new_text": new_text,
         "tokens_used": used,
         "tokens_remaining": auth.tokens_remaining(refreshed),
