@@ -15,6 +15,7 @@ import shlex
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -54,7 +55,9 @@ class BeqTrainerApp(tk.Tk):
         self.output_dir = tk.StringVar(value=str(default_output))
         self.python_executable = tk.StringVar(value=sys.executable)
         self.status_text = tk.StringVar(value="Ready")
+        self.current_action = tk.StringVar(value="Idle")
         self.progress_text = tk.StringVar(value="No training run is active")
+        self.elapsed_text = tk.StringVar(value="Elapsed: 00:00")
 
         self.settings = {
             key: tk.StringVar(value=value) for key, value in DEFAULTS.items()
@@ -69,11 +72,16 @@ class BeqTrainerApp(tk.Tk):
         self.output_queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self.stop_requested = False
         self.current_step = 0
+        self.current_loss = "n/a"
+        self.validation_loss = "n/a"
+        self.start_time: float | None = None
+        self.elapsed_seconds = 0.0
 
         self._configure_style()
         self._build_interface()
         self._update_command_preview()
         self.after(100, self._poll_output)
+        self.after(250, self._update_elapsed)
 
     def _configure_style(self) -> None:
         style = ttk.Style(self)
@@ -189,14 +197,27 @@ class BeqTrainerApp(tk.Tk):
         status_bar.grid(row=6, column=0, sticky="ew", pady=(10, 0))
         status_bar.columnconfigure(0, weight=1)
         status_bar.columnconfigure(1, weight=2)
+        status_bar.columnconfigure(2, weight=1)
+        status_bar.columnconfigure(3, weight=2)
         ttk.Label(status_bar, textvariable=self.status_text, style="Status.TLabel").grid(
             row=0, column=0, sticky="w"
         )
+        ttk.Label(status_bar, text="Current action:").grid(
+            row=0, column=1, sticky="e", padx=(12, 4)
+        )
+        ttk.Label(status_bar, textvariable=self.current_action).grid(
+            row=0, column=2, sticky="w"
+        )
+        ttk.Label(status_bar, textvariable=self.elapsed_text).grid(
+            row=0, column=3, sticky="e"
+        )
         ttk.Label(status_bar, textvariable=self.progress_text).grid(
-            row=0, column=1, sticky="w", padx=(16, 0)
+            row=1, column=0, columnspan=2, sticky="w", pady=(6, 0)
         )
         self.progress = ttk.Progressbar(status_bar, mode="determinate", maximum=1)
-        self.progress.grid(row=0, column=2, sticky="ew", padx=(12, 0))
+        self.progress.grid(
+            row=1, column=2, columnspan=2, sticky="ew", padx=(12, 0), pady=(6, 0)
+        )
 
         actions = ttk.Frame(root)
         actions.grid(row=7, column=0, sticky="ew", pady=(12, 0))
@@ -435,9 +456,15 @@ class BeqTrainerApp(tk.Tk):
 
         self.stop_requested = False
         self.current_step = 0
+        self.current_loss = "n/a"
+        self.validation_loss = "n/a"
+        self.start_time = time.monotonic()
+        self.elapsed_seconds = 0.0
         self.progress.configure(value=0, maximum=max(1, int(self.settings["max_steps"].get())))
-        self.progress_text.set("Starting training...")
+        self.progress_text.set(self._format_progress())
         self.status_text.set("Training is running")
+        self.current_action.set("Preparing training process")
+        self.elapsed_text.set("Elapsed: 00:00")
         self._set_running_state(True)
         self._clear_log()
         self._append_log("Starting Beq training...")
@@ -490,41 +517,86 @@ class BeqTrainerApp(tk.Tk):
 
     def _handle_output_line(self, line: str) -> None:
         self._append_log(line)
-        match = re.search(r"\\bstep\\s+(\\d+)\\s+\\|\\s+loss\\s+([0-9.eE+-]+)", line)
+        lower_line = line.lower()
+        if lower_line.startswith("using device:"):
+            self.current_action.set(f"Using {line.split(':', 1)[1].strip()} device")
+        elif "loading" in lower_line and "data" in lower_line:
+            self.current_action.set("Loading training data")
+        elif "vocab size" in lower_line:
+            self.current_action.set("Building tokenizer")
+        elif "saved best checkpoint" in lower_line or "saved checkpoint" in lower_line:
+            self.current_action.set("Saving checkpoint")
+
+        match = re.search(r"\bstep\s+(\d+)\s+\|\s+loss\s+([0-9.eE+-]+)", line)
         if match:
             self.current_step = int(match.group(1))
+            self.current_loss = match.group(2)
+            self.current_action.set(f"Training step {self.current_step}")
             self.progress.configure(value=self.current_step)
-            self.progress_text.set(
-                f"Step {self.current_step} / {self.settings['max_steps'].get()}   Loss: {match.group(2)}"
-            )
-        validation = re.search(r"val loss:\\s*([0-9.eE+-]+)", line)
+            self.progress_text.set(self._format_progress())
+
+        validation = re.search(r"val loss:\s*([0-9.eE+-]+)", line)
         if validation:
-            self.progress_text.set(
-                f"Step {self.current_step} / {self.settings['max_steps'].get()}   Validation loss: {validation.group(1)}"
-            )
+            self.validation_loss = validation.group(1)
+            self.current_action.set("Evaluating model")
+            self.progress_text.set(self._format_progress())
+
+    def _format_progress(self) -> str:
+        try:
+            maximum = max(1, int(self.settings["max_steps"].get()))
+        except ValueError:
+            maximum = 1
+        percent = min(100.0, max(0.0, self.current_step / maximum * 100))
+        return (
+            f"Step {self.current_step} / {maximum} ({percent:.1f}%)  |  "
+            f"Loss: {self.current_loss}  |  Validation loss: {self.validation_loss}"
+        )
+
+    def _update_elapsed(self) -> None:
+        if self.start_time is not None:
+            self.elapsed_seconds = time.monotonic() - self.start_time
+            minutes, seconds = divmod(int(self.elapsed_seconds), 60)
+            hours, minutes = divmod(minutes, 60)
+            if hours:
+                elapsed = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+            else:
+                elapsed = f"{minutes:02d}:{seconds:02d}"
+            self.elapsed_text.set(f"Elapsed: {elapsed}")
+        self.after(250, self._update_elapsed)
 
     def _training_finished(self, return_code: int) -> None:
         self.process = None
         self._set_running_state(False)
         if self.stop_requested:
             self.status_text.set("Training stopped")
-            self.progress_text.set(f"Stopped at step {self.current_step}")
+            self.current_action.set("Stopped by user")
+            self.progress_text.set(self._format_progress())
             self._append_log("Training stopped by the user.")
         elif return_code == 0:
             self.status_text.set("Training completed")
-            self.progress_text.set("Final checkpoint saved by train.py")
+            self.current_action.set("Completed")
+            try:
+                self.current_step = int(self.settings["max_steps"].get())
+            except ValueError:
+                pass
+            self.progress_text.set(self._format_progress())
             self._append_log("Training completed successfully.")
         else:
             self.status_text.set("Training failed")
+            self.current_action.set("Process failed")
             self.progress_text.set(f"Process exited with code {return_code}")
             self._append_log(f"Training process exited with code {return_code}.")
+        if self.start_time is not None:
+            self.elapsed_seconds = time.monotonic() - self.start_time
+        self.start_time = None
 
     def _stop_training(self) -> None:
         if self.process is None or self.process.poll() is not None:
             return
         self.stop_requested = True
         self.status_text.set("Stopping training...")
-        self.progress_text.set("Waiting for the training process to stop")
+        self.current_action.set("Stopping training process")
+        self.progress_text.set(self._format_progress())
         self._append_log("Stop requested by the user.")
         try:
             self.process.terminate()
