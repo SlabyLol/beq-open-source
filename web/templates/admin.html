@@ -1,116 +1,132 @@
 {% extends "base.html" %}
-
-{% block title %}Admin{% endblock %}
-
+{% block title %}Admin — Beq{% endblock %}
 {% block content %}
 <section class="hero">
     <h1>Admin</h1>
-    <p class="subtitle">Controls this page only the admin account can see.</p>
+    <p class="subtitle">Mode, accounts, crawler, training</p>
 </section>
 
 <section class="chat-box">
-    <h3 style="margin-bottom:1rem;">AI mode (configs/AI.txt)</h3>
-    <p class="subtitle" style="margin-bottom:1rem;">
-        Current mode: <strong>{{ ai_mode.label }}</strong> — {{ ai_mode.description }}
+    <h3 style="margin-bottom:1rem;">AI mode</h3>
+    <p style="margin-bottom:0.8rem;">
+        Current: <strong>{{ ai_mode.label }}</strong> — {{ ai_mode.description }}
     </p>
     <form action="/admin/mode" method="post" class="chat-form">
-        <div class="controls" style="flex-direction:column; align-items:stretch; gap:0.6rem;">
+        <div style="display:flex; flex-wrap:wrap; gap:1rem; margin-bottom:1rem;">
             {% for key, cfg in modes.items() %}
-            <label style="display:flex; align-items:center; gap:0.6rem; font-size:0.95rem; color:var(--text);">
+            <label style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
                 <input type="radio" name="mode" value="{{ key }}" {% if key == ai_mode.key %}checked{% endif %}>
-                <span><strong>{{ cfg.label }}</strong> — {{ cfg.description }}</span>
+                {{ cfg.badge }} — {{ cfg.label }}
             </label>
             {% endfor %}
         </div>
-        <div class="controls">
-            <button type="submit" class="btn-primary">Save mode</button>
-        </div>
+        <button type="submit" class="btn-primary">Save mode</button>
     </form>
 </section>
 
 <section class="chat-box">
-    <h3 style="margin-bottom:1rem;">Accounts & Tokens</h3>
-    <p class="subtitle" style="margin-bottom:1rem;">
-        Default limit: {{ weekly_default }} tokens/week. Set a custom number per account or <code>inf</code> for unlimited.
-        Your device (trace) is linked as <strong>{{ my_trace[:12] }}…</strong>.
+    <h3 style="margin-bottom:1rem;">🕷️ Crawler (real web crawl)</h3>
+    <p style="margin-bottom:0.6rem; color:var(--muted);">
+        Stores pages in the database (Neon/Postgres via DATABASE_URL on Render) so knowledge survives restarts.
+        Web search uses DuckDuckGo result pages (Google-style queries). Google itself blocks most bots.
     </p>
-    <div style="overflow-x:auto;">
-    <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
-        <thead>
-            <tr style="text-align:left; border-bottom:1px solid var(--border); color:var(--text-muted);">
-                <th style="padding:0.5rem;">User</th>
-                <th style="padding:0.5rem;">Email</th>
-                <th style="padding:0.5rem;">Admin</th>
-                <th style="padding:0.5rem;">Used</th>
-                <th style="padding:0.5rem;">Limit</th>
-                <th style="padding:0.5rem;">Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-        {% for u in users %}
-            <tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:0.5rem;">{{ u.username }}</td>
-                <td style="padding:0.5rem; color:var(--text-muted);">{{ u.email }}</td>
-                <td style="padding:0.5rem;">{{ "yes" if u.is_admin else "no" }}</td>
-                <td style="padding:0.5rem;">{{ u.tokens_used }}</td>
-                <td style="padding:0.5rem;">
-                    {% if u.token_limit == unlimited_value %}∞
-                    {% elif u.token_limit is none %}{{ weekly_default }} (default)
-                    {% else %}{{ u.token_limit }}{% endif %}
-                </td>
-                <td style="padding:0.5rem;">
-                    <form action="/admin/users/{{ u.id }}/limit" method="post" style="display:inline-flex; gap:0.3rem;">
-                        <input type="text" name="limit" placeholder="e.g. 5000 or inf" style="width:120px; padding:0.3rem 0.5rem; font-size:0.85rem;">
-                        <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0; font-size:0.8rem;">Set limit</button>
-                    </form>
-                    <form action="/admin/users/{{ u.id }}/reset" method="post" style="display:inline;">
-                        <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0 0 0 0.3rem; font-size:0.8rem; background:var(--surface-2); color:var(--text);">Reset</button>
-                    </form>
-                    {% if u.username != "admin" %}
-                    <form action="/admin/users/{{ u.id }}/admin" method="post" style="display:inline;">
-                        {% if u.is_admin %}
-                        <input type="hidden" name="is_admin" value="0">
-                        <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0 0 0 0.3rem; font-size:0.8rem; background:var(--surface-2); color:var(--text);">Remove admin</button>
-                        {% else %}
-                        <input type="hidden" name="is_admin" value="1">
-                        <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0 0 0 0.3rem; font-size:0.8rem;">Make admin</button>
-                        {% endif %}
-                    </form>
-                    <form action="/admin/users/{{ u.id }}/delete" method="post" style="display:inline;"
-                          onsubmit="return confirm('Really delete account {{ u.username }}?');">
-                        <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0 0 0 0.3rem; font-size:0.8rem; background:var(--error);">Delete</button>
-                    </form>
-                    {% endif %}
-                </td>
-            </tr>
+    <p style="margin-bottom:0.8rem;">
+        Status:
+        <strong>{{ "ON" if crawl_status.enabled else "OFF" }}</strong>
+        · Web in chat: <strong>{{ "ON" if crawl_status.web_in_chat else "OFF" }}</strong>
+        · Auto search+crawl: <strong>{{ "ON" if crawl_status.auto_search else "OFF" }}</strong>
+        · Docs (sample): <strong>{{ crawl_status.doc_count_sample }}</strong>
+        · DB: <strong>{{ "Postgres/Neon" if crawl_status.using_postgres else "SQLite/file" }}</strong>
+    </p>
+
+    <form action="/admin/crawl/settings" method="post" style="display:flex; flex-wrap:wrap; gap:1rem; align-items:center; margin-bottom:1.2rem;">
+        <label><input type="checkbox" name="enabled" value="1" {% if crawl_status.enabled %}checked{% endif %}> Crawler ON</label>
+        <label><input type="checkbox" name="web_in_chat" value="1" {% if crawl_status.web_in_chat %}checked{% endif %}> Use web in chat answers</label>
+        <label><input type="checkbox" name="auto_search" value="1" {% if crawl_status.auto_search %}checked{% endif %}> Auto search+crawl on questions</label>
+        <button type="submit" class="btn-primary">Save crawler switches</button>
+    </form>
+
+    <form action="/admin/crawl" method="post" style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.8rem;">
+        <input type="url" name="url" placeholder="https://en.wikipedia.org/wiki/..." required style="flex:1; min-width:220px; padding:0.5rem;">
+        <button type="submit" class="btn-primary">Crawl URL</button>
+    </form>
+
+    <form action="/admin/crawl/search" method="post" style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.8rem;">
+        <input type="text" name="q" placeholder="Search web (e.g. what is gravity)" required style="flex:1; min-width:220px; padding:0.5rem;">
+        <button type="submit" class="btn-primary">Search &amp; crawl top results</button>
+    </form>
+
+    <form action="/admin/crawl/random" method="post" style="margin-bottom:1rem;">
+        <button type="submit" class="btn-primary">Random crawl (seed pages)</button>
+    </form>
+
+    {% if crawl_message %}
+    <p style="margin-bottom:0.8rem; padding:0.6rem; background:var(--card); border-radius:8px;">{{ crawl_message }}</p>
+    {% endif %}
+
+    <h4 style="margin-bottom:0.5rem;">Recent crawled docs</h4>
+    <ul style="font-size:0.9rem; line-height:1.5;">
+        {% for d in crawl_docs %}
+        <li><a href="{{ d.url }}" target="_blank" rel="noopener">{{ d.url }}</a> — {{ d.chars or 0 }} chars {% if d.crawled_at %}· {{ d.crawled_at }}{% endif %}</li>
+        {% else %}
+        <li>No docs yet — crawl a URL or run random crawl.</li>
         {% endfor %}
-        </tbody>
-    </table>
+    </ul>
+</section>
+
+<section class="chat-box">
+    <h3 style="margin-bottom:1rem;">Accounts &amp; Tokens</h3>
+    <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+            <thead>
+                <tr style="text-align:left; border-bottom:1px solid var(--border);">
+                    <th style="padding:0.4rem;">User</th>
+                    <th style="padding:0.4rem;">Email</th>
+                    <th style="padding:0.4rem;">Admin</th>
+                    <th style="padding:0.4rem;">Limit</th>
+                    <th style="padding:0.4rem;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr style="border-bottom:1px solid var(--border);">
+                    <td style="padding:0.4rem;">{{ u.username }}</td>
+                    <td style="padding:0.4rem;">{{ u.email }}</td>
+                    <td style="padding:0.4rem;">{{ "yes" if u.is_admin else "no" }}</td>
+                    <td style="padding:0.4rem;">{{ u.token_limit }}</td>
+                    <td style="padding:0.4rem;">
+                        <form action="/admin/users/{{ u.id }}/limit" method="post" style="display:inline-flex; gap:0.3rem;">
+                            <input name="limit" placeholder="5000 or inf" style="width:6rem; padding:0.2rem;">
+                            <button type="submit">Set</button>
+                        </form>
+                        <form action="/admin/users/{{ u.id }}/reset" method="post" style="display:inline;">
+                            <button type="submit">Reset</button>
+                        </form>
+                        <form action="/admin/users/{{ u.id }}/admin" method="post" style="display:inline;">
+                            <input type="hidden" name="is_admin" value="{{ 0 if u.is_admin else 1 }}">
+                            <button type="submit">{{ "Remove admin" if u.is_admin else "Make admin" }}</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 </section>
 
 <section class="chat-box">
-    <h3 style="margin-bottom:1rem;">Model & data</h3>
-    <ul>
-        <li>Checkpoint loaded: <strong>{{ "yes" if checkpoint_exists else "no" }}</strong></li>
-        <li>data/input.txt exists: <strong>{{ "yes" if data_stats.exists else "no" }}</strong>
-            ({{ data_stats.size_bytes }} bytes)</li>
-        <li>Training currently running: <strong>{{ "yes" if training_running else "no" }}</strong></li>
+    <h3 style="margin-bottom:1rem;">Model &amp; data</h3>
+    <ul style="line-height:1.7;">
+        <li>Checkpoint: <strong>{{ "yes" if checkpoint_exists else "no" }}</strong></li>
+        <li>Data file size: <strong>{{ data_stats.size_bytes }}</strong> bytes</li>
+        <li>Training running: <strong>{{ "yes" if training_running else "no" }}</strong></li>
     </ul>
-
     <form action="/admin/train" method="post" style="margin-top:1rem;">
         <button type="submit" class="btn-primary" {% if training_running %}disabled{% endif %}>
             {% if training_running %}Training running…{% else %}Start training now{% endif %}
         </button>
     </form>
-    <p class="subtitle" style="margin-top:0.5rem;">
-        Reads configs/default.yaml and runs train/train.py in the background on this server.
-        Reload this page to refresh the log.
-    </p>
-
-    {% if log_tail %}
     <h3 style="margin-top:1.5rem;">Last training log lines</h3>
-    <pre style="white-space:pre-wrap;">{{ log_tail }}</pre>
-    {% endif %}
+    <pre style="white-space:pre-wrap; font-size:0.8rem; max-height:240px; overflow:auto;">{{ log_tail or "(empty)" }}</pre>
 </section>
 {% endblock %}
