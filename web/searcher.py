@@ -1,7 +1,4 @@
-"""
-Beq Search — fast Wikipedia + DuckDuckGo + crawl store.
-No slow live crawl on the chat path (admin crawl still does that).
-"""
+"""Beq Search — fast Wikipedia (few tries) + DDG + store. Chat must stay under ~10s."""
 from __future__ import annotations
 
 import re
@@ -19,8 +16,8 @@ try:
 except Exception:
     pass
 
-TIMEOUT = 6.0
-USER_AGENT = "BeqSearchBot/1.4 (+https://beq.onrender.com)"
+TIMEOUT = 3.0
+USER_AGENT = "BeqSearchBot/1.5 (+https://beq.onrender.com)"
 
 
 def _client():
@@ -50,23 +47,21 @@ def search_wikipedia(query: str) -> dict | None:
     q = (query or "").strip()
     if not q or httpx is None:
         return None
-    candidates = []
-    candidates.append(q)
-    candidates.append(q.title())
+    # Max 2 title attempts + optional opensearch — keep total under ~9s
     words = re.findall(r"[A-Za-z][A-Za-z0-9\-]+", q)
+    candidates = [q]
     if words:
-        candidates.append(" ".join(words[-3:]))
-        candidates.append(words[-1].title())
-        candidates.append(words[-1])
+        last = words[-1]
+        if last.lower() != q.lower():
+            candidates.append(last.title() if last.islower() else last)
     seen = set()
     try:
         with _client() as client:
-            for cand in candidates:
-                cand = (cand or "").strip()
-                key = cand.lower()
-                if not cand or key in seen:
+            for cand in candidates[:2]:
+                cand = cand.strip()
+                if not cand or cand.lower() in seen:
                     continue
-                seen.add(key)
+                seen.add(cand.lower())
                 try:
                     r = client.get(
                         f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote(cand)}"
@@ -90,7 +85,6 @@ def search_wikipedia(query: str) -> dict | None:
                     }
                 except Exception:
                     continue
-            # OpenSearch fallback (one extra request)
             try:
                 s = client.get(
                     "https://en.wikipedia.org/w/api.php",
@@ -115,7 +109,7 @@ def search_wikipedia(query: str) -> dict | None:
                     return None
                 d = r.json()
                 extract = (d.get("extract") or "").strip()
-                if not extract:
+                if len(extract) < 40:
                     return None
                 return {
                     "source": "wikipedia",
@@ -203,7 +197,6 @@ def _looks_like_search(prompt: str) -> bool:
 
 
 def try_search_answer(prompt: str, use_web: bool = True) -> str | None:
-    """Fast answer from Wikipedia / DDG / crawl store. No live multi-page crawl here."""
     if not crawler.is_enabled():
         return None
     if not crawler.auto_search_enabled() and not crawler.web_in_chat_enabled():
@@ -230,26 +223,25 @@ def try_search_answer(prompt: str, use_web: bool = True) -> str | None:
     store_only = not (use_web and crawler.web_in_chat_enabled())
     parts: list[str] = []
 
-    # Fast web path only (Wikipedia / DDG) — no search_and_crawl (too slow for chat)
     if not store_only:
-        web = search_wikipedia(q) or search_duckduckgo(q)
+        web = search_wikipedia(q)
+        if not web:
+            web = search_duckduckgo(q)
         if web:
             parts.append(web["text"])
             if web.get("url"):
                 parts.append(f"(Source: {web.get('source', 'web')} — {web['url']})")
 
-    try:
-        store = crawler.search_store(q, limit=3)
-        if store and store[0]["score"] >= 0.35:
-            top = store[0]
-            # Prefer web text; append store only if no web or strong store hit
-            if not parts or top["score"] >= 0.55:
-                t = top.get("title") or ""
-                parts.append(f"From crawl store{' — ' + t if t else ''}: {top['snippet'][:400]}")
+    if not parts:
+        try:
+            store = crawler.search_store(q, limit=3)
+            if store and store[0]["score"] >= 0.3:
+                top = store[0]
+                parts.append(top["snippet"][:500])
                 if top.get("url"):
                     parts.append(f"(Crawled: {top['url']})")
-    except Exception as e:
-        print(f"[searcher] store: {e}")
+        except Exception as e:
+            print(f"[searcher] store: {e}")
 
     if not parts:
         return None
