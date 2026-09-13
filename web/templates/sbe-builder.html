@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}SBE Builder{% endblock %}
+{% block content %}
+<section class="hero">
+    <h1>SBE Knowledge Builder</h1>
+    <p class="subtitle">Build <code>.sbe</code> FAQ files online. Beq answers these questions with the exact A: text — no paraphrasing.</p>
+</section>
+
+{% if flash_success %}<p class="flash success">{{ flash_success }}</p>{% endif %}
+{% if flash_error %}<p class="flash error">{{ flash_error }}</p>{% endif %}
+
+<section class="chat-box" style="display:grid; gap:1.2rem;">
+    <form method="post" action="/sbe-builder/save" class="chat-form">
+        <label>File name (in configs/)
+            <input type="text" name="filename" value="{{ filename or 'knowledge.sbe' }}" required pattern="[A-Za-z0-9._-]+\.sbe" title="name.sbe">
+        </label>
+        <p class="subtitle" style="margin:0.4rem 0;">Format: one <code>Q:</code> line, then <code>A:</code> line. Aliases: <code>Q: Hi | Hello</code>. Multi-line answers allowed until the next Q:.</p>
+        <label>Content
+            <textarea name="content" rows="22" style="width:100%; font-family:ui-monospace,monospace; font-size:0.9rem;" required>{{ content }}</textarea>
+        </label>
+        <div class="controls">
+            <button type="submit" class="btn-primary">Save .sbe</button>
+            <a class="btn-secondary" href="/sbe-builder">Reload list</a>
+        </div>
+    </form>
+
+    <div>
+        <h3>Existing files</h3>
+        <ul>
+        {% for f in files %}
+            <li><a href="/sbe-builder?file={{ f }}">{{ f }}</a></li>
+        {% else %}
+            <li>No .sbe files yet.</li>
+        {% endfor %}
+        </ul>
+    </div>
+
+    <div>
+        <h3>Template</h3>
+        <pre style="white-space:pre-wrap; background:var(--card, #111); padding:1rem; border-radius:8px;"># comment
+Q: Who are you?
+A: I am Beq, an open-source AI.
+
+Q: What is Beq? | What's Beq?
+A: Beq is a pure-PyTorch language model you own.
+
+[identity]
+name=Beq
+role=open-source pure-PyTorch language model
+about=I am Beq. I run without external AI APIs.</pre>
+    </div>
+</section>
+{% endblock %}
