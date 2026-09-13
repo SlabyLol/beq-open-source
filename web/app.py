@@ -1,5 +1,5 @@
 """
-Beq Web – Auth, quotas, own model, AI.txt mode switching
+Beq Web – Auth, quotas, own model, AI.txt mode switching, user API keys
 """
 
 import os
@@ -24,9 +24,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TRAIN_LOG_PATH = REPO_ROOT / "checkpoints" / "train.log"
 _training_state = {"process": None}
 
-# Separate secret for the config API (not a user login!). Set this as an
-# environment variable in production (e.g. on Render), never hardcode it.
-# If it's left empty, the config API refuses every write for safety.
 BEQ_API_KEY = os.environ.get("BEQ_API_KEY", "").strip()
 
 CHECKPOINT_PATH = Path(__file__).resolve().parents[1] / "checkpoints" / "beq_best.pt"
@@ -44,7 +41,7 @@ tokenizer = None
 def load_model():
     global model, tokenizer
     if not CHECKPOINT_PATH.exists() or not TOKENIZER_PATH.exists():
-        print("No checkpoint – train first: python train/train.py --config configs/default.yaml")
+        print("No checkpoint – train first")
         return False
     tokenizer = CharTokenizer.load(TOKENIZER_PATH)
     ckpt = torch.load(CHECKPOINT_PATH, map_location=DEVICE, weights_only=False)
@@ -63,27 +60,17 @@ def load_model():
 
 
 TRACE_COOKIE = "beq_trace"
-TRACE_MAX_AGE = 400 * 24 * 3600  # ~400 days (browser max for long-lived cookies)
+TRACE_MAX_AGE = 400 * 24 * 3600
 
 
 @app.middleware("http")
 async def ensure_trace_cookie(request: Request, call_next):
-    """
-    Give every browser a long-lived, random trace id (separate from the
-    login session cookie). This lets Beq recognize a returning device even
-    across logins/logouts, and lets the admin see which accounts have used
-    which device (web/auth.py: link_trace / accounts_for_trace).
-    It's just a random id — no personal data, and it carries no permissions
-    by itself (you still need to log in to do anything).
-    """
     trace_id = request.cookies.get(TRACE_COOKIE)
     new_trace = trace_id is None
     if new_trace:
         trace_id = secrets.token_hex(16)
     request.state.trace_id = trace_id
-
     response = await call_next(request)
-
     if new_trace:
         response.set_cookie(
             TRACE_COOKIE, trace_id,
@@ -98,10 +85,10 @@ async def startup():
     try:
         settings_store.init_settings_table()
     except Exception as e:
-        print(f"[startup] settings DB not reachable yet ({e}); AI.txt fallback will be used")
+        print(f"[startup] settings DB not reachable yet ({e})")
     load_model()
     if not BEQ_API_KEY:
-        print("[startup] WARNING: BEQ_API_KEY is not set — /api/config write access is disabled.")
+        print("[startup] WARNING: BEQ_API_KEY is not set — /api/config write disabled.")
 
 
 def _session(request: Request):
@@ -110,6 +97,14 @@ def _session(request: Request):
 
 def _user(request: Request):
     return auth.get_user(_session(request))
+
+
+def _user_from_request(request: Request, authorization: str | None = None):
+    u = _user(request)
+    if u:
+        return u
+    auth_header = authorization or request.headers.get("authorization")
+    return auth.user_from_api_key(auth_header)
 
 
 def _ctx(request: Request, **extra):
@@ -202,7 +197,6 @@ async def logout(request: Request):
 
 
 def _generate(prompt: str, max_tokens: int, temperature: float, preamble: str = "") -> tuple[str, str]:
-    """Generate a continuation. Returns (full_prompt_used, full_decoded_text)."""
     full_prompt = f"{preamble}{prompt}"
     ids = tokenizer.encode(full_prompt)
     if not ids:
@@ -263,8 +257,8 @@ class GenerateRequest(BaseModel):
 
 
 @app.post("/api/generate")
-async def api_generate(request: Request, req: GenerateRequest):
-    user = _user(request)
+async def api_generate(request: Request, req: GenerateRequest, authorization: str | None = Header(default=None)):
+    user = _user_from_request(request, authorization)
     mode_cfg = ai_mode.get_mode_config()
     if not mode_cfg["public_chat"] and not _is_admin(user):
         return JSONResponse(
@@ -274,7 +268,10 @@ async def api_generate(request: Request, req: GenerateRequest):
     if model is None or tokenizer is None:
         return JSONResponse({"error": "Model not loaded"}, status_code=503)
     if user is None:
-        return JSONResponse({"error": "Login required"}, status_code=401)
+        return JSONResponse(
+            {"error": "Auth required. Login cookie or Authorization: Bearer beq_... API key."},
+            status_code=401,
+        )
     ok, msg = auth.can_use_tokens(user, req.max_tokens)
     if not ok:
         return JSONResponse({"error": msg}, status_code=429)
@@ -282,20 +279,51 @@ async def api_generate(request: Request, req: GenerateRequest):
     new_text = full[len(full_prompt):] if full.startswith(full_prompt) else full
     used = min(req.max_tokens, max(1, len(new_text)))
     auth.consume_tokens(user["id"], used)
+    refreshed = auth.get_user_by_id(user["id"]) or user
     return {
         "prompt": req.prompt,
         "generated": full,
         "new_text": new_text,
         "tokens_used": used,
-        "tokens_remaining": auth.tokens_remaining(auth.get_user(_session(request))),
+        "tokens_remaining": auth.tokens_remaining(refreshed),
         "mode": mode_cfg["key"],
     }
 
 
-# ---------------------------------------------------------------------------
-# Admin panel: mode switching (AI.txt) + training controls.
-# Only ever shown/usable to the admin account (see web/auth.py, is_admin).
-# ---------------------------------------------------------------------------
+@app.get("/api/keys")
+async def api_list_keys(request: Request):
+    user = _user(request)
+    if user is None:
+        return JSONResponse({"error": "Login required"}, status_code=401)
+    keys = auth.list_api_keys(user["id"])
+    return {
+        "keys": keys,
+        "max_keys": None if user.get("is_admin") else auth.MAX_API_KEYS,
+        "tokens_remaining": auth.tokens_remaining(user),
+    }
+
+
+@app.post("/api/keys")
+async def api_create_key(request: Request, name: str = Form("default")):
+    user = _user(request)
+    if user is None:
+        return JSONResponse({"error": "Login required"}, status_code=401)
+    ok, msg, raw = auth.create_api_key(user, name=name)
+    if not ok:
+        return JSONResponse({"error": msg}, status_code=400)
+    return {"ok": True, "message": msg, "api_key": raw, "name": name}
+
+
+@app.post("/api/keys/{key_id}/revoke")
+async def api_revoke_key(request: Request, key_id: int):
+    user = _user(request)
+    if user is None:
+        return JSONResponse({"error": "Login required"}, status_code=401)
+    ok, msg = auth.revoke_api_key(user["id"], key_id)
+    if not ok:
+        return JSONResponse({"error": msg}, status_code=404)
+    return {"ok": True, "message": msg}
+
 
 def _require_admin(request: Request):
     user = _user(request)
@@ -379,27 +407,19 @@ async def admin_delete_user(request: Request, user_id: int):
 
 
 def _load_training_args() -> list[str]:
-    """
-    Build the actual CLI flags train/train.py understands, sourced from
-    configs/default.yaml. train.py itself has no --config flag (it only
-    takes individual --flags), so we translate the yaml here.
-    """
     config_path = REPO_ROOT / "configs" / "default.yaml"
     args = []
     try:
         import yaml
         cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     except Exception as e:
-        print(f"[admin_train] could not read configs/default.yaml ({e}); using train.py defaults")
+        print(f"[admin_train] could not read config ({e})")
         return args
-
     model_cfg = cfg.get("model", {})
     train_cfg = cfg.get("training", {})
-
     def add(flag, value):
         if value is not None:
             args.extend([flag, str(value)])
-
     add("--data", train_cfg.get("data_path"))
     add("--out_dir", train_cfg.get("out_dir"))
     add("--d_model", model_cfg.get("d_model"))
@@ -419,49 +439,28 @@ async def admin_start_training(request: Request):
     user = _require_admin(request)
     if user is None:
         return RedirectResponse("/login", status_code=303)
-
     proc = _training_state["process"]
     if proc is None or proc.poll() is not None:
         TRAIN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         log_file = open(TRAIN_LOG_PATH, "w", encoding="utf-8")
         cmd = [sys.executable, str(REPO_ROOT / "train" / "train.py")] + _load_training_args()
         _training_state["process"] = subprocess.Popen(
-            cmd,
-            cwd=str(REPO_ROOT),
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
+            cmd, cwd=str(REPO_ROOT), stdout=log_file, stderr=subprocess.STDOUT,
         )
     return RedirectResponse("/admin", status_code=303)
 
-
-# ---------------------------------------------------------------------------
-# Config / integration API.
-#
-# This is meant for embedding Beq into other things (a dashboard, a bot,
-# a CI step, whatever) — separate from normal user login. Protected by
-# BEQ_API_KEY (set as an environment variable), sent as:
-#   Authorization: Bearer <BEQ_API_KEY>
-#
-# On Render: Dashboard -> your service -> Environment -> Add:
-#   BEQ_API_KEY   = <a long random secret you generate>
-#   DATABASE_URL  = <your Postgres connection string>   (Render Postgres,
-#                   Neon, Supabase, ...) — without this, mode changes are
-#                   only written to configs/AI.txt, which Render resets on
-#                   every redeploy.
-# ---------------------------------------------------------------------------
 
 def _check_api_key(authorization: str | None) -> None:
     if not BEQ_API_KEY:
         raise HTTPException(status_code=503, detail="BEQ_API_KEY is not configured on this server.")
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing 'Authorization: Bearer <key>' header.")
+        raise HTTPException(status_code=401, detail="Missing Authorization: Bearer <key>")
     if authorization.removeprefix("Bearer ").strip() != BEQ_API_KEY:
         raise HTTPException(status_code=403, detail="Invalid API key.")
 
 
 @app.get("/api/status")
 async def api_status():
-    """Public, read-only health/status summary. Safe to poll from anywhere."""
     mode_cfg = ai_mode.get_mode_config()
     return {
         "model_loaded": model is not None,
@@ -469,13 +468,12 @@ async def api_status():
         "mode": mode_cfg["key"],
         "mode_label": mode_cfg["label"],
         "public_chat": mode_cfg["public_chat"],
-        "persistence": "database" if settings_store.using_postgres() else "sqlite/file (not persistent on most free hosts)",
+        "persistence": "database" if settings_store.using_postgres() else "sqlite/file",
     }
 
 
 @app.get("/api/config")
 async def api_get_config(authorization: str | None = Header(default=None)):
-    """Full config incl. available modes. Requires the API key."""
     _check_api_key(authorization)
     mode_cfg = ai_mode.get_mode_config()
     data_path = REPO_ROOT / "data" / "input.txt"
@@ -495,7 +493,6 @@ class ConfigUpdate(BaseModel):
 
 @app.post("/api/config")
 async def api_set_config(update: ConfigUpdate, authorization: str | None = Header(default=None)):
-    """Change the AI mode remotely. Requires the API key. Persists to the DB."""
     _check_api_key(authorization)
     ok, msg = ai_mode.set_mode(update.mode)
     if not ok:
