@@ -33,7 +33,8 @@ pip install -r requirements.txt
 ```
 Then download the Beq_Trainer.py and configure an .sbe set it how you want! Example:
 ```
-identity.spe# Identity + core facts for Beq
+identity.sbe
+# Identity + core facts for Beq
 
 [ai]
 ai=default
