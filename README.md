@@ -137,3 +137,13 @@ MIT License – do whatever you want with Beq.
 ---
 
 **Beq is yours.** Train it, improve it, share it.
+
+## Continuous generation with Tkinter
+
+To repeatedly run `generate.py` on Windows with Start, Pause/Resume and Stop controls:
+
+```powershell
+py chat_loop_gui.py
+```
+
+The GUI writes all output to `chat-loop.log` and lets you configure the prompt, interval, maximum tokens and temperature. Pause waits until the current generation finishes, then starts no new run until resumed.
