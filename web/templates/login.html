@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Login{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <h1>Login</h1>
+    <p class="subtitle">Log in to chat with Beq and use your token quota.</p>
+</section>
+
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+{% if success %}<div class="alert alert-warning">{{ success }}</div>{% endif %}
+
+<section class="chat-box">
+    <form action="/login" method="post" class="chat-form">
+        <label for="username">Username or email</label>
+        <input type="text" id="username" name="username" required>
+
+        <label for="password" style="margin-top:1rem;">Password</label>
+        <input type="password" id="password" name="password" required>
+
+        <div class="controls">
+            <button type="submit" class="btn-primary">Log in</button>
+        </div>
+    </form>
+</section>
+
+<p class="subtitle">No account yet? <a href="/register">Register here</a>.</p>
+{% endblock %}
