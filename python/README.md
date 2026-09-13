@@ -14,12 +14,12 @@ cd python && pip install -e .
 from beq_client import Beq
 
 beq = Beq(
-    base_url="https://YOUR-BEQ-HOST",
+    base_url="https://beq.onrender.com",
     api_key="beq_YOUR_KEY",   # from /api-dashboard
     language="de",
 )
 
-print(beq.generate("Wer bist du?"))
+print(beq.generate("Who are you?"))
 print(beq.chat("Hello", language="en"))
 print(beq.status())
 print(Beq.languages())
@@ -37,11 +37,11 @@ beq.generate("Bonjour")
 ## CLI
 
 ```bash
-export BEQ_URL=https://YOUR-HOST
+export BEQ_URL=https://beq.onrender.com
 export BEQ_API_KEY=beq_...
 beq languages
 beq status
-beq generate -l de "Hallo Beq"
+beq generate -l de "Hello Beq"
 ```
 
 ## Env
