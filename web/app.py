@@ -155,24 +155,24 @@ def _api_dashboard_ctx(request: Request, **extra):
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse("index.html", _ctx(request))
+    return templates.TemplateResponse(request, "index.html", _ctx(request))
 
 
 @app.get("/about", response_class=HTMLResponse)
 async def about(request: Request):
-    return templates.TemplateResponse("about.html", _ctx(request))
+    return templates.TemplateResponse(request, "about.html", _ctx(request))
 
 
 @app.get("/generate", response_class=HTMLResponse)
 async def generate_page(request: Request):
-    return templates.TemplateResponse("generate.html", _ctx(request))
+    return templates.TemplateResponse(request, "generate.html", _ctx(request))
 
 
 @app.get("/api-dashboard", response_class=HTMLResponse)
 async def api_dashboard(request: Request):
     if not _user(request):
         return RedirectResponse("/login", status_code=303)
-    return templates.TemplateResponse("api.html", _api_dashboard_ctx(request))
+    return templates.TemplateResponse(request, "api.html", _api_dashboard_ctx(request))
 
 
 @app.post("/api-dashboard/create")
@@ -181,7 +181,7 @@ async def api_dashboard_create(request: Request, name: str = Form("default")):
     if not user:
         return RedirectResponse("/login", status_code=303)
     ok, msg, _key = auth.create_api_key(user, name)
-    return templates.TemplateResponse("api.html", _api_dashboard_ctx(request, message=msg, ok=ok))
+    return templates.TemplateResponse(request, "api.html", _api_dashboard_ctx(request, message=msg, ok=ok))
 
 
 @app.post("/api-dashboard/revoke/{key_id}")
@@ -190,28 +190,28 @@ async def api_dashboard_revoke(request: Request, key_id: int):
     if not user:
         return RedirectResponse("/login", status_code=303)
     ok, msg = auth.revoke_api_key(user["id"], key_id)
-    return templates.TemplateResponse("api.html", _api_dashboard_ctx(request, message=msg, ok=ok))
+    return templates.TemplateResponse(request, "api.html", _api_dashboard_ctx(request, message=msg, ok=ok))
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", _ctx(request, error=None))
+    return templates.TemplateResponse(request, "login.html", _ctx(request, error=None))
 
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
-    return templates.TemplateResponse("register.html", _ctx(request, error=None))
+    return templates.TemplateResponse(request, "register.html", _ctx(request, error=None))
 
 
 @app.post("/register")
 async def register_post(request: Request, username: str = Form(...), email: str = Form(...), password: str = Form(...)):
     ok, msg = auth.register(username, email, password)
     if not ok:
-        return templates.TemplateResponse("register.html", _ctx(request, error=msg))
+        return templates.TemplateResponse(request, "register.html", _ctx(request, error=msg))
     trace = getattr(request.state, "trace_id", None) or request.cookies.get(TRACE_COOKIE)
     ok2, session, msg2 = auth.login(username, password, trace_id=trace)
     if not ok2 or not session:
-        return templates.TemplateResponse("login.html", _ctx(request, error="Registered - please log in"))
+        return templates.TemplateResponse(request, "login.html", _ctx(request, error="Registered - please log in"))
     resp = RedirectResponse("/", status_code=303)
     resp.set_cookie("beq_session", session, httponly=True, max_age=60 * 60 * 24 * 30)
     return resp
@@ -222,7 +222,7 @@ async def login_post(request: Request, username: str = Form(...), password: str 
     trace = getattr(request.state, "trace_id", None) or request.cookies.get(TRACE_COOKIE)
     ok, session, msg = auth.login(username, password, trace_id=trace)
     if not ok or not session:
-        return templates.TemplateResponse("login.html", _ctx(request, error=msg or "Invalid login"))
+        return templates.TemplateResponse(request, "login.html", _ctx(request, error=msg or "Invalid login"))
     resp = RedirectResponse("/", status_code=303)
     resp.set_cookie("beq_session", session, httponly=True, max_age=60 * 60 * 24 * 30)
     return resp
@@ -291,7 +291,7 @@ async def chat(request: Request, prompt: str = Form(...), max_tokens: int = Form
             preamble = mode_cfg.get("preamble", "") + LANGUAGE_PREFIXES.get(language, "")
             _, answer = _answer(prompt, max_tokens, temperature, preamble)
     result = {"prompt": prompt, "completion": answer} if answer is not None else None
-    return templates.TemplateResponse("index.html", _ctx(request, prompt=prompt, answer=answer, error=error, result=result))
+    return templates.TemplateResponse(request, "index.html", _ctx(request, prompt=prompt, answer=answer, error=error, result=result))
 
 
 class GenerateRequest(BaseModel):
@@ -363,7 +363,7 @@ async def sbe_builder_page(request: Request, file: str | None = None):
     filename = file or "knowledge.sbe"
     path = configs / filename
     content = path.read_text(encoding="utf-8") if path.exists() else "# Beq knowledge\n\n"
-    return templates.TemplateResponse("sbe-builder.html", _ctx(request, files=files, filename=filename, content=content))
+    return templates.TemplateResponse(request, "sbe-builder.html", _ctx(request, files=files, filename=filename, content=content))
 
 
 @app.post("/sbe-builder/save")
@@ -389,7 +389,7 @@ async def admin_page(request: Request):
     my_trace = getattr(request.state, "trace_id", None) or request.cookies.get(TRACE_COOKIE)
     crawl_docs = crawler.list_docs(limit=20)
     crawl_status = crawler.status()
-    return templates.TemplateResponse("admin.html", _ctx(
+    return templates.TemplateResponse(request, "admin.html", _ctx(
         request, modes=ai_mode.MODES, data_stats=data_stats, training_running=False,
         log_tail="", checkpoint_exists=CHECKPOINT_PATH.exists(), users=users,
         unlimited_value=auth.UNLIMITED, weekly_default=auth.WEEKLY_TOKEN_LIMIT,
