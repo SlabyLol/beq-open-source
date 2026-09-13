@@ -16,10 +16,24 @@ from pydantic import BaseModel
 
 from model import BeqTransformer, CharTokenizer
 from web import ai_mode, auth, crawler, settings_store
-try:
-    from web import auth_compat  # noqa: F401 — user_from_session etc.
-except Exception as _e:
-    print(f"[app] auth_compat: {_e}")
+# Hard alias so home/chat never AttributeError
+if not hasattr(auth, "user_from_session") and hasattr(auth, "get_user"):
+    auth.user_from_session = auth.get_user
+if not hasattr(auth, "check_and_consume"):
+    def _check_and_consume(user_id, amount):
+        user = auth.get_user_by_id(user_id) if hasattr(auth, "get_user_by_id") else None
+        if not user:
+            return False, "User not found"
+        ok, msg = auth.can_use_tokens(user, amount)
+        if not ok:
+            return False, msg
+        auth.consume_tokens(user_id, amount)
+        return True, "ok"
+    auth.check_and_consume = _check_and_consume
+if not hasattr(auth, "reset_tokens") and hasattr(auth, "reset_usage"):
+    auth.reset_tokens = auth.reset_usage
+if not hasattr(auth, "delete_api_key") and hasattr(auth, "revoke_api_key"):
+    auth.delete_api_key = auth.revoke_api_key
 from web.knowledge import try_knowledge_answer
 from web.mathtool import try_math_answer
 from web.searcher import try_search_answer
@@ -95,7 +109,14 @@ def _session(request: Request):
 
 
 def _user(request: Request):
-    return auth.user_from_session(_session(request))
+    fn = getattr(auth, "user_from_session", None) or getattr(auth, "get_user", None)
+    if fn is None:
+        return None
+    try:
+        return fn(_session(request))
+    except Exception as e:
+        print(f"[app._user] {e}")
+        return None
 
 
 def _is_admin(user) -> bool:
