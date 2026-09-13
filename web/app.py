@@ -68,19 +68,24 @@ def load_model():
     if not CHECKPOINT_PATH.exists() or not TOKENIZER_PATH.exists():
         print("No checkpoint found — chat will use .sbe / math / search until you train.")
         return
-    ckpt = torch.load(CHECKPOINT_PATH, map_location=DEVICE, weights_only=False)
-    tokenizer = CharTokenizer.load(TOKENIZER_PATH)
-    config = ckpt["config"]
-    model = BeqTransformer(
-        vocab_size=config["vocab_size"],
-        d_model=config["d_model"],
-        n_layers=config["n_layers"],
-        n_heads=config["n_heads"],
-        max_seq_len=config["max_seq_len"],
-    ).to(DEVICE)
-    model.load_state_dict(ckpt["model"])
-    model.eval()
-    print(f"Beq loaded | params={sum(p.numel() for p in model.parameters()):,}")
+    try:
+        ckpt = torch.load(CHECKPOINT_PATH, map_location=DEVICE, weights_only=False)
+        tokenizer = CharTokenizer.load(TOKENIZER_PATH)
+        config = ckpt["config"]
+        model = BeqTransformer(
+            vocab_size=config["vocab_size"],
+            d_model=config["d_model"],
+            n_layers=config["n_layers"],
+            n_heads=config["n_heads"],
+            max_seq_len=config["max_seq_len"],
+        ).to(DEVICE)
+        model.load_state_dict(ckpt["model"])
+        model.eval()
+        print(f"Beq loaded | params={sum(p.numel() for p in model.parameters()):,}")
+    except Exception as e:
+        print(f"[load_model] failed: {e}")
+        model = None
+        tokenizer = None
 
 
 @app.middleware("http")
@@ -128,12 +133,31 @@ def _user_from_request(request: Request, authorization: str | None = None):
 
 def _ctx(request: Request, **extra):
     user = _user(request)
-    mode_cfg = ai_mode.get_mode_config()
+    try:
+        mode_cfg = ai_mode.get_mode_config()
+    except Exception as e:
+        print(f"[ctx] ai_mode error: {e}")
+        mode_cfg = {
+            "key": "default",
+            "label": "Default",
+            "badge": "Default",
+            "description": "Default mode",
+            "preamble": "",
+            "public_chat": True,
+        }
     base = {
+        "request": request,
         "user": user,
         "model_loaded": model is not None,
         "ai_mode": mode_cfg,
         "languages": list(LANGUAGE_PREFIXES.keys()),
+        "error": None,
+        "prompt": None,
+        "answer": None,
+        "result": None,
+        "language": "en",
+        "max_tokens": 100,
+        "temperature": 0.8,
     }
     base.update(extra)
     return base
@@ -154,17 +178,17 @@ def _api_dashboard_ctx(request: Request, **extra):
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse(request=request, name="index.html", context=_ctx(request))
+    return templates.TemplateResponse("index.html", _ctx(request))
 
 
 @app.get("/about", response_class=HTMLResponse)
 async def about(request: Request):
-    return templates.TemplateResponse(request=request, name="about.html", context=_ctx(request))
+    return templates.TemplateResponse("about.html", _ctx(request))
 
 
 @app.get("/generate", response_class=HTMLResponse)
 async def generate_page(request: Request):
-    return templates.TemplateResponse(request=request, name="generate.html", context=_ctx(request))
+    return templates.TemplateResponse("generate.html", _ctx(request))
 
 
 @app.get("/api-dashboard", response_class=HTMLResponse)
@@ -172,9 +196,7 @@ async def api_dashboard(request: Request):
     user = _user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    return templates.TemplateResponse(
-        request=request, name="api.html", context=_api_dashboard_ctx(request)
-    )
+    return templates.TemplateResponse("api.html", _api_dashboard_ctx(request))
 
 
 @app.post("/api-dashboard/create")
@@ -183,11 +205,7 @@ async def api_dashboard_create(request: Request, name: str = Form("default")):
     if not user:
         return RedirectResponse("/login", status_code=303)
     ok, msg, _key = auth.create_api_key(user["id"], name)
-    return templates.TemplateResponse(
-        request=request,
-        name="api.html",
-        context=_api_dashboard_ctx(request, message=msg, ok=ok),
-    )
+    return templates.TemplateResponse("api.html", _api_dashboard_ctx(request, message=msg, ok=ok))
 
 
 @app.post("/api-dashboard/revoke/{key_id}")
@@ -196,25 +214,17 @@ async def api_dashboard_revoke(request: Request, key_id: int):
     if not user:
         return RedirectResponse("/login", status_code=303)
     ok, msg = auth.revoke_api_key(user["id"], key_id)
-    return templates.TemplateResponse(
-        request=request,
-        name="api.html",
-        context=_api_dashboard_ctx(request, message=msg, ok=ok),
-    )
+    return templates.TemplateResponse("api.html", _api_dashboard_ctx(request, message=msg, ok=ok))
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse(
-        request=request, name="login.html", context=_ctx(request, error=None)
-    )
+    return templates.TemplateResponse("login.html", _ctx(request, error=None))
 
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
-    return templates.TemplateResponse(
-        request=request, name="register.html", context=_ctx(request, error=None)
-    )
+    return templates.TemplateResponse("register.html", _ctx(request, error=None))
 
 
 @app.post("/register")
@@ -226,9 +236,7 @@ async def register_post(
 ):
     ok, msg, session = auth.register(username, email, password)
     if not ok:
-        return templates.TemplateResponse(
-            request=request, name="register.html", context=_ctx(request, error=msg)
-        )
+        return templates.TemplateResponse("register.html", _ctx(request, error=msg))
     resp = RedirectResponse("/", status_code=303)
     resp.set_cookie("beq_session", session, httponly=True, max_age=60 * 60 * 24 * 30)
     return resp
@@ -238,9 +246,7 @@ async def register_post(
 async def login_post(request: Request, username: str = Form(...), password: str = Form(...)):
     ok, msg, session = auth.login(username, password)
     if not ok:
-        return templates.TemplateResponse(
-            request=request, name="login.html", context=_ctx(request, error=msg)
-        )
+        return templates.TemplateResponse("login.html", _ctx(request, error=msg))
     resp = RedirectResponse("/", status_code=303)
     resp.set_cookie("beq_session", session, httponly=True, max_age=60 * 60 * 24 * 30)
     return resp
@@ -320,10 +326,10 @@ async def chat(
             lang_prefix = LANGUAGE_PREFIXES.get(language, "")
             preamble = mode_cfg["preamble"] + lang_prefix
             _, answer = _answer(prompt, max_tokens, temperature, preamble)
+    result = {"prompt": prompt, "completion": answer} if answer is not None else None
     return templates.TemplateResponse(
-        request=request,
-        name="index.html",
-        context=_ctx(request, prompt=prompt, answer=answer, error=error),
+        "index.html",
+        _ctx(request, prompt=prompt, answer=answer, error=error, result=result),
     )
 
 
@@ -402,8 +408,8 @@ async def sbe_builder_page(request: Request, file: str | None = None):
     if path.exists():
         content = path.read_text(encoding="utf-8")
     return templates.TemplateResponse(
-        request=request, name="sbe-builder.html",
-        context=_ctx(request, files=files, filename=filename, content=content),
+        "sbe-builder.html",
+        _ctx(request, files=files, filename=filename, content=content),
     )
 
 
@@ -438,9 +444,8 @@ async def admin_page(request: Request):
     crawl_docs = crawler.list_docs(limit=20)
     crawl_status = crawler.status()
     return templates.TemplateResponse(
-        request=request,
-        name="admin.html",
-        context=_ctx(
+        "admin.html",
+        _ctx(
             request,
             modes=ai_mode.MODES,
             data_stats=data_stats,
@@ -556,18 +561,21 @@ async def api_set_config(update: ConfigUpdate, authorization: str | None = Heade
     return {"ok": True, "mode": ai_mode.get_mode_key(), "message": msg}
 
 
-crawl_admin.register(
-    app,
-    require_admin=_require_admin,
-    templates=templates,
-    ctx=_ctx,
-    repo_root=REPO_ROOT,
-    train_log_path=TRAIN_LOG_PATH,
-    training_state=_training_state,
-    checkpoint_path=CHECKPOINT_PATH,
-    auth=auth,
-    ai_mode=ai_mode,
-)
+try:
+    crawl_admin.register(
+        app,
+        require_admin=_require_admin,
+        templates=templates,
+        ctx=_ctx,
+        repo_root=REPO_ROOT,
+        train_log_path=TRAIN_LOG_PATH,
+        training_state=_training_state,
+        checkpoint_path=CHECKPOINT_PATH,
+        auth=auth,
+        ai_mode=ai_mode,
+    )
+except Exception as e:
+    print(f"[crawl_admin] register skipped: {e}")
 
 
 if __name__ == "__main__":
