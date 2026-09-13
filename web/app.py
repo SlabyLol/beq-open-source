@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from model import BeqTransformer, CharTokenizer
 from web import ai_mode, auth, settings_store
 from web.mathtool import try_math_answer
+from web.knowledge import try_knowledge_answer
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TRAIN_LOG_PATH = REPO_ROOT / "checkpoints" / "train.log"
@@ -180,9 +181,7 @@ async def api_dashboard(request: Request):
     if user is None:
         return RedirectResponse("/login", status_code=303)
     return templates.TemplateResponse(
-        request=request,
-        name="api.html",
-        context=_api_dashboard_ctx(request),
+        request=request, name="api.html", context=_api_dashboard_ctx(request),
     )
 
 
@@ -194,14 +193,10 @@ async def api_dashboard_create(request: Request, name: str = Form("default")):
     ok, msg, raw = auth.create_api_key(user, name=name)
     if not ok:
         return templates.TemplateResponse(
-            request=request,
-            name="api.html",
-            context=_api_dashboard_ctx(request, flash_error=msg),
+            request=request, name="api.html", context=_api_dashboard_ctx(request, flash_error=msg),
         )
     return templates.TemplateResponse(
-        request=request,
-        name="api.html",
-        context=_api_dashboard_ctx(request, flash_success=msg, new_key=raw),
+        request=request, name="api.html", context=_api_dashboard_ctx(request, flash_success=msg, new_key=raw),
     )
 
 
@@ -238,10 +233,7 @@ async def register_page(request: Request):
 
 @app.post("/register")
 async def register_post(
-    request: Request,
-    username: str = Form(...),
-    email: str = Form(...),
-    password: str = Form(...),
+    request: Request, username: str = Form(...), email: str = Form(...), password: str = Form(...),
 ):
     ok, msg = auth.register(username, email, password)
     if not ok:
@@ -301,11 +293,17 @@ def _clean_completion(text: str) -> str:
 
 
 def _answer(prompt: str, max_tokens: int, temperature: float, preamble: str) -> tuple[str, str]:
+    # 1) Knowledge / FAQ from configs/*.sbe
+    know = try_knowledge_answer(prompt)
+    if know is not None:
+        return prompt, know
+    # 2) Math calculator
     math_answer = try_math_answer(prompt)
     if math_answer is not None:
         return prompt, math_answer
+    # 3) Neural model
     if model is None or tokenizer is None:
-        return prompt, "[Model not loaded]"
+        return prompt, "[Model not loaded — train via Admin, or add facts in configs/*.sbe]"
     full_prompt, full = _generate(prompt, max_tokens, temperature, preamble)
     completion = full[len(full_prompt):] if full.startswith(full_prompt) else full
     completion = _clean_completion(completion)
@@ -329,8 +327,8 @@ async def chat(
 
     if not mode_cfg["public_chat"] and not _is_admin(user):
         error = f"Beq is currently in '{mode_cfg['label']}' mode and not available to the public right now."
-    elif model is None and try_math_answer(prompt) is None:
-        error = "Model not loaded. Train first."
+    elif model is None and try_math_answer(prompt) is None and try_knowledge_answer(prompt) is None:
+        error = "Model not loaded. Train first or add knowledge in configs/*.sbe."
     elif user is None:
         error = "Please log in to generate."
     else:
@@ -382,8 +380,11 @@ async def api_generate(request: Request, req: GenerateRequest, authorization: st
             {"error": "Auth required. Login cookie or Authorization: Bearer beq_... API key."},
             status_code=401,
         )
-    math_answer = try_math_answer(req.prompt)
-    if math_answer is None and (model is None or tokenizer is None):
+    if (
+        try_math_answer(req.prompt) is None
+        and try_knowledge_answer(req.prompt) is None
+        and (model is None or tokenizer is None)
+    ):
         return JSONResponse({"error": "Model not loaded"}, status_code=503)
     ok, msg = auth.can_use_tokens(user, req.max_tokens)
     if not ok:
