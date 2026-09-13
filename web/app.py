@@ -16,6 +16,10 @@ from pydantic import BaseModel
 
 from model import BeqTransformer, CharTokenizer
 from web import ai_mode, auth, crawler, settings_store
+try:
+    from web import auth_compat  # noqa: F401 — user_from_session etc.
+except Exception as _e:
+    print(f"[app] auth_compat: {_e}")
 from web.knowledge import try_knowledge_answer
 from web.mathtool import try_math_answer
 from web.searcher import try_search_answer
@@ -282,7 +286,6 @@ def _answer(prompt, max_tokens, temperature, preamble):
     """Knowledge → math → web search → model. Never answer facts with identity fluff."""
     know = try_knowledge_answer(prompt)
     if know:
-        # Accept knowledge always unless it is pure identity fluff on a non-identity question
         if not _is_identity_fluff(know) or _is_identity_question(prompt):
             return prompt, know
 
@@ -311,7 +314,6 @@ def _answer(prompt, max_tokens, temperature, preamble):
     if _is_identity_fluff(completion) and not _is_identity_question(prompt):
         if search_answer:
             return prompt, search_answer
-        # one more search try (fast path)
         again = try_search_answer(prompt, use_web=True)
         if again and not _is_identity_fluff(again):
             return prompt, again
