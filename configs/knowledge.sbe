@@ -1,5 +1,4 @@
-# Extra knowledge you can extend anytime — just add Q:/A: pairs
-# Restart not required: files are re-read every few seconds.
+# Extra knowledge — Q:/A: pairs (exact + fuzzy match)
 
 Q: What is 2+2?
 A: 4
@@ -27,3 +26,24 @@ A: You're welcome! Happy to help.
 
 Q: How are you?
 A: Running fine on the server. Ready when you are.
+
+Q: What is the Sun?
+A: The Sun is the star at the center of the Solar System. It is a nearly perfect ball of hot plasma, mostly hydrogen and helium, and provides the light and heat that make life on Earth possible.
+
+Q: What is the sun?
+A: The Sun is the star at the center of the Solar System. It is a nearly perfect ball of hot plasma, mostly hydrogen and helium, and provides the light and heat that make life on Earth possible.
+
+Q: What is Earth?
+A: Earth is the third planet from the Sun and the only astronomical object known to harbor life. It is a rocky planet with oceans of liquid water and an atmosphere rich in nitrogen and oxygen.
+
+Q: What is Python?
+A: Python is a high-level, general-purpose programming language known for readable syntax. It is widely used for web development, data science, AI, and scripting.
+
+Q: What is machine learning?
+A: Machine learning is a field of artificial intelligence where systems learn patterns from data instead of being programmed with fixed rules. Common approaches include supervised, unsupervised, and reinforcement learning.
+
+Q: What is AI?
+A: Artificial intelligence (AI) is the field of computer science that aims to build systems that can perform tasks that normally require human intelligence, such as understanding language, recognizing images, and making decisions.
+
+Q: What is gravity?
+A: Gravity is the fundamental force of attraction between masses. On Earth it gives weight to physical objects and causes them to fall toward the ground when dropped.
