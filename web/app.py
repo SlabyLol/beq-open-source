@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from model import BeqTransformer, CharTokenizer
 from web import ai_mode, auth, crawler, settings_store
 from web.knowledge import try_knowledge_answer
-from web.math_tools import try_math_answer
+from web.mathtool import try_math_answer
 from web.searcher import try_search_answer
 from web import crawl_admin
 
