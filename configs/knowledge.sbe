@@ -1,0 +1,29 @@
+# Extra knowledge you can extend anytime — just add Q:/A: pairs
+# Restart not required: files are re-read every few seconds.
+
+Q: What is 2+2?
+A: 4
+
+Q: Capital of France?
+A: Paris.
+
+Q: Capital of Germany?
+A: Berlin.
+
+Q: Help
+A: You can chat with me, open /api-dashboard for API keys, or ask the admin to adjust limits and training. For math questions I use a built-in calculator.
+
+Q: Hello
+A: Hello! I am Beq. How can I help you today?
+
+Q: Hi
+A: Hi! I am Beq, your open-source AI. What would you like to do?
+
+Q: Thanks
+A: You're welcome!
+
+Q: Thank you
+A: You're welcome! Happy to help.
+
+Q: How are you?
+A: Running fine on the server. Ready when you are.
