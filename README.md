@@ -23,50 +23,108 @@ No external AI APIs. No closed weights. Everything is yours.
 
 ## Quick Start
 
-### 1. Install dependencies
+### 1. API
+Get an API on https://beq.onrendeder.com/api-dashboard and save it on a txt file on cloud or pc for safety
 
-```bash
+### 2. Using Configures
+Get the file requirements.txt download make it sure its in a folder open CMD in the folder and type
+```
 pip install -r requirements.txt
 ```
+Then download the Beq_Trainer.py and configure an .sbe set it how you want! Example:
+```
+identity.spe# Identity + core facts for Beq
 
-### 2. Train Beq
+[ai]
+ai=default
+name=Beq
+role=a helpful general-purpose assistant
+about=I am Beq, a helpful general-purpose assistant. I run as your own open-source model.
 
-```bash
-# Uses a small sample text if data/input.txt does not exist
-python train/train.py
+Q: Who are you?
+A: I am Beq, a helpful general-purpose assistant.
+
+Q: What is your name?
+A: My name is Beq.
+
+Q: What is the Sun?
+A: The Sun is the star at the center of the Solar System. It is a nearly perfect ball of hot plasma, mostly hydrogen and helium, and provides the light and heat that make life on Earth possible.
+
+Q: What is the sun?
+A: The Sun is the star at the center of the Solar System. It is a nearly perfect ball of hot plasma, mostly hydrogen and helium, and provides the light and heat that make life on Earth possible.
+
+Q: What is Earth?
+A: Earth is the third planet from the Sun and the only astronomical object known to harbor life.
+
+Q: What is Python?
+A: Python is a high-level, general-purpose programming language known for readable syntax. It is widely used for web development, data science, AI, and scripting.
+
+Q: What is machine learning?
+A: Machine learning is a field of artificial intelligence where systems learn patterns from data instead of being programmed with fixed rules.
+
+Q: What is AI?
+A: Artificial intelligence (AI) is the field of computer science that aims to build systems that can perform tasks that normally require human intelligence.
+
+Q: What is gravity?
+A: Gravity is the fundamental force of attraction between masses. On Earth it gives weight to physical objects and causes them to fall toward the ground when dropped.
+```
+```
+knowledge.sbe
+# Extra knowledge — Q:/A: pairs (exact + fuzzy match)
+
+Q: What is 2+2?
+A: 4
+
+Q: Capital of France?
+A: Paris.
+
+Q: Capital of Germany?
+A: Berlin.
+
+Q: Help
+A: You can chat with me, open /api-dashboard for API keys, or ask the admin to adjust limits and training. For math questions I use a built-in calculator.
+
+Q: Hello
+A: Hello! I am Beq. How can I help you today?
+
+Q: Hi
+A: Hi! I am Beq, your open-source AI. What would you like to do?
+
+Q: Thanks
+A: You're welcome!
+
+Q: Thank you
+A: You're welcome! Happy to help.
+
+Q: How are you?
+A: Running fine on the server. Ready when you are.
+
+Q: What is the Sun?
+A: The Sun is the star at the center of the Solar System. It is a nearly perfect ball of hot plasma, mostly hydrogen and helium, and provides the light and heat that make life on Earth possible.
+
+Q: What is the sun?
+A: The Sun is the star at the center of the Solar System. It is a nearly perfect ball of hot plasma, mostly hydrogen and helium, and provides the light and heat that make life on Earth possible.
+
+Q: What is Earth?
+A: Earth is the third planet from the Sun and the only astronomical object known to harbor life. It is a rocky planet with oceans of liquid water and an atmosphere rich in nitrogen and oxygen.
+
+Q: What is Python?
+A: Python is a high-level, general-purpose programming language known for readable syntax. It is widely used for web development, data science, AI, and scripting.
+
+Q: What is machine learning?
+A: Machine learning is a field of artificial intelligence where systems learn patterns from data instead of being programmed with fixed rules. Common approaches include supervised, unsupervised, and reinforcement learning.
+
+Q: What is AI?
+A: Artificial intelligence (AI) is the field of computer science that aims to build systems that can perform tasks that normally require human intelligence, such as understanding language, recognizing images, and making decisions.
+
+Q: What is gravity?
+A: Gravity is the fundamental force of attraction between masses. On Earth it gives weight to physical objects and causes them to fall toward the ground when dropped.
 ```
 
-Useful options:
+### 3. Using the API to communicate
+Implement the API in your code see examples at dasboard (default API generate link is **beq.onrender.com/api/generate**)
 
-```bash
-python train/train.py \
-  --data data/input.txt \
-  --d_model 256 \
-  --n_layers 6 \
-  --n_heads 8 \
-  --block_size 128 \
-  --batch_size 32 \
-  --max_steps 5000 \
-  --out_dir checkpoints
-```
-
-After training you will have:
-- `checkpoints/beq_best.pt`
-- `checkpoints/tokenizer.json`
-
-### 3. Start the web interface
-
-```bash
-python web/app.py
-```
-
-Then open: [http://localhost:8000](http://localhost:8000)
-
-Pages:
-- `/` – Chat with Beq
-- `/generate` – API-style generation
-- `/about` – Project information
-
+### Setup Completed!
 ---
 
 ## Project Structure
