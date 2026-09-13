@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
-"""Beq Trainer – download Beq-Trainer-full.py from repo root for the complete 9-tab UI.
-
-This stub keeps the entrypoint working. Prefer:
-  python Beq-Trainer-full.py
-when that file is present (full Train/Config/Knowledge/Identity/Data/Checkpoints/Generate/Tools/Help).
-"""
+"""Beq Trainer — complete 9-tab control panel (self-extracting)."""
 from __future__ import annotations
+import base64
+import zlib
 from pathlib import Path
-import runpy
-import sys
 
-_FULL = Path(__file__).resolve().parent / "Beq-Trainer-full.py"
+_ROOT = Path(__file__).resolve().parent
+_PARTS = [(_ROOT / f"beq_trainer_p{i}.txt").read_text(encoding="utf-8").strip() for i in range(3)]
+
+
+def main() -> None:
+    code = zlib.decompress(base64.b64decode("".join(_PARTS))).decode("utf-8")
+    ns = {"__name__": "__main__", "__file__": str(Path(__file__).resolve())}
+    exec(compile(code, "Beq-Trainer.py", "exec"), ns)
+
 
 if __name__ == "__main__":
-    if _FULL.exists():
-        sys.argv[0] = str(_FULL)
-        runpy.run_path(str(_FULL), run_name="__main__")
-    else:
-        print("Beq-Trainer-full.py not found next to this file.")
-        print("Add Beq-Trainer-full.py (9-tab version) to the repo root, then run:")
-        print("  python Beq-Trainer-full.py")
-        sys.exit(1)
+    main()
