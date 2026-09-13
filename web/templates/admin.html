@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Admin{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <h1>Admin</h1>
+    <p class="subtitle">Controls this page only the admin account can see.</p>
+</section>
+
+<section class="chat-box">
+    <h3 style="margin-bottom:1rem;">AI mode (configs/AI.txt)</h3>
+    <p class="subtitle" style="margin-bottom:1rem;">
+        Current mode: <strong>{{ ai_mode.label }}</strong> — {{ ai_mode.description }}
+    </p>
+    <form action="/admin/mode" method="post" class="chat-form">
+        <div class="controls" style="flex-direction:column; align-items:stretch; gap:0.6rem;">
+            {% for key, cfg in modes.items() %}
+            <label style="display:flex; align-items:center; gap:0.6rem; font-size:0.95rem; color:var(--text);">
+                <input type="radio" name="mode" value="{{ key }}" {% if key == ai_mode.key %}checked{% endif %}>
+                <span><strong>{{ cfg.label }}</strong> — {{ cfg.description }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <div class="controls">
+            <button type="submit" class="btn-primary">Save mode</button>
+        </div>
+    </form>
+</section>
+
+<section class="chat-box">
+    <h3 style="margin-bottom:1rem;">Accounts & Tokens</h3>
+    <p class="subtitle" style="margin-bottom:1rem;">
+        Standard-Limit: {{ weekly_default }} Tokens/Woche. Setze pro Account eine eigene Zahl oder <code>inf</code> für unbegrenzt.
+        Dein Gerät (Trace) ist bereits mit <strong>{{ my_trace[:12] }}…</strong> hinterlegt.
+    </p>
+    <div style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+        <thead>
+            <tr style="text-align:left; border-bottom:1px solid var(--border); color:var(--text-muted);">
+                <th style="padding:0.5rem;">User</th>
+                <th style="padding:0.5rem;">Email</th>
+                <th style="padding:0.5rem;">Admin</th>
+                <th style="padding:0.5rem;">Verbraucht</th>
+                <th style="padding:0.5rem;">Limit</th>
+                <th style="padding:0.5rem;">Aktionen</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for u in users %}
+            <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:0.5rem;">{{ u.username }}</td>
+                <td style="padding:0.5rem; color:var(--text-muted);">{{ u.email }}</td>
+                <td style="padding:0.5rem;">{{ "ja" if u.is_admin else "nein" }}</td>
+                <td style="padding:0.5rem;">{{ u.tokens_used }}</td>
+                <td style="padding:0.5rem;">
+                    {% if u.token_limit == unlimited_value %}∞
+                    {% elif u.token_limit is none %}{{ weekly_default }} (Standard)
+                    {% else %}{{ u.token_limit }}{% endif %}
+                </td>
+                <td style="padding:0.5rem;">
+                    <form action="/admin/users/{{ u.id }}/limit" method="post" style="display:inline-flex; gap:0.3rem;">
+                        <input type="text" name="limit" placeholder="z.B. 5000 oder inf" style="width:120px; padding:0.3rem 0.5rem; font-size:0.85rem;">
+                        <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0; font-size:0.8rem;">Setzen</button>
+                    </form>
+                    <form action="/admin/users/{{ u.id }}/reset" method="post" style="display:inline;">
+                        <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0 0 0 0.3rem; font-size:0.8rem; background:var(--surface-2); color:var(--text);">Reset</button>
+                    </form>
+                    {% if u.username != "admin" %}
+                    <form action="/admin/users/{{ u.id }}/delete" method="post" style="display:inline;"
+                          onsubmit="return confirm('Account {{ u.username }} wirklich löschen?');">
+                        <button type="submit" class="btn-primary" style="padding:0.3rem 0.7rem; margin:0 0 0 0.3rem; font-size:0.8rem; background:var(--error);">Löschen</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</section>
+
+<section class="chat-box">
+    <h3 style="margin-bottom:1rem;">Model & data</h3>
+    <ul>
+        <li>Checkpoint loaded: <strong>{{ "yes" if checkpoint_exists else "no" }}</strong></li>
+        <li>data/input.txt exists: <strong>{{ "yes" if data_stats.exists else "no" }}</strong>
+            ({{ data_stats.size_bytes }} bytes)</li>
+        <li>Training currently running: <strong>{{ "yes" if training_running else "no" }}</strong></li>
+    </ul>
+
+    <form action="/admin/train" method="post" style="margin-top:1rem;">
+        <button type="submit" class="btn-primary" {% if training_running %}disabled{% endif %}>
+            {% if training_running %}Training running…{% else %}Start training now{% endif %}
+        </button>
+    </form>
+    <p class="subtitle" style="margin-top:0.5rem;">
+        Reads configs/default.yaml and runs train/train.py in the background on this server.
+        Reload this page to refresh the log.
+    </p>
+
+    {% if log_tail %}
+    <h3 style="margin-top:1.5rem;">Last training log lines</h3>
+    <pre style="white-space:pre-wrap;">{{ log_tail }}</pre>
+    {% endif %}
+</section>
+{% endblock %}
