@@ -147,3 +147,5 @@ py chat_loop_gui.py
 ```
 
 The GUI writes all output to `chat-loop.log` and lets you configure the prompt, interval, maximum tokens and temperature. Pause waits until the current generation finishes, then starts no new run until resumed.
+
+# Warning it's almost an idiot
