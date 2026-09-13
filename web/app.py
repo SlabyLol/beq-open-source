@@ -90,21 +90,50 @@ def load_model():
         print(f"[load_model] loading {CHECKPOINT}")
         ckpt = torch.load(CHECKPOINT, map_location=DEVICE, weights_only=False)
         config = ckpt.get("config") or {}
-        chars = ckpt.get("chars") or ckpt.get("vocab") or ""
-        tokenizer = CharTokenizer(chars)
-        model = BeqTransformer(
-            vocab_size=config["vocab_size"],
-            d_model=config["d_model"],
-            n_heads=config["n_heads"],
-            n_layers=config["n_layers"],
-            block_size=config["block_size"],
-            dropout=config.get("dropout", 0.1),
+
+        # Tokenizer: prefer sidecar tokenizer.json, then chars/vocab in ckpt
+        tok_path = REPO_ROOT / "checkpoints" / "tokenizer.json"
+        if tok_path.exists():
+            tokenizer = CharTokenizer.load(tok_path)
+            print(f"[load_model] tokenizer from {tok_path.name} vocab={tokenizer.vocab_size}")
+        else:
+            chars = ckpt.get("chars") or ckpt.get("vocab") or ""
+            if isinstance(chars, (list, tuple)):
+                chars = "".join(chars)
+            if not chars and isinstance(ckpt.get("stoi"), dict):
+                tokenizer = CharTokenizer()
+                tokenizer.stoi = ckpt["stoi"]
+                tokenizer.itos = {int(k): v for k, v in (ckpt.get("itos") or {}).items()}
+            else:
+                tokenizer = CharTokenizer(chars if chars else "abcdefghijklmnopqrstuvwxyz ")
+            print(f"[load_model] tokenizer from ckpt vocab={tokenizer.vocab_size}")
+
+        vocab_size = int(config.get("vocab_size") or tokenizer.vocab_size)
+        d_model = int(config.get("d_model", 128))
+        n_heads = int(config.get("n_heads", 4))
+        n_layers = int(config.get("n_layers", 4))
+        max_seq_len = int(
+            config.get("max_seq_len") or config.get("block_size") or 128
         )
-        model.load_state_dict(ckpt["model"])
+        dropout = float(config.get("dropout", 0.1))
+
+        model = BeqTransformer(
+            vocab_size=vocab_size,
+            d_model=d_model,
+            n_heads=n_heads,
+            n_layers=n_layers,
+            max_seq_len=max_seq_len,
+            dropout=dropout,
+        )
+        state = ckpt.get("model") or ckpt.get("state_dict") or ckpt
+        model.load_state_dict(state, strict=False)
         model.eval()
-        print(f"Beq loaded | params={sum(p.numel() for p in model.parameters()):,} | file={CHECKPOINT.name}")
+        nparams = sum(p.numel() for p in model.parameters())
+        print(f"Beq loaded | params={nparams:,} | file={CHECKPOINT.name} | seq={max_seq_len}")
     except Exception as e:
+        import traceback
         print(f"[load_model] {e}")
+        traceback.print_exc()
         model = tokenizer = None
 
 
