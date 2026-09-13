@@ -4,7 +4,7 @@
 {% block content %}
 <div class="hero">
     <h1>API Dashboard</h1>
-    <p class="subtitle">Manage your API keys and call Beq from other apps</p>
+    <p class="subtitle">Manage your API keys and integrate Beq in any language</p>
 </div>
 
 {% if flash_error %}
@@ -89,21 +89,346 @@
 
 <div class="content" style="margin-top:1.5rem;">
     <h2>How to call the API</h2>
-    <p>Use your key as a Bearer token (no browser login needed):</p>
-    <pre>POST /api/generate
-Authorization: Bearer beq_YOUR_KEY
-Content-Type: application/json
+    <p>Use your key as a Bearer token (no browser login needed). Replace <code>YOUR-HOST</code> and <code>beq_YOUR_KEY</code>.</p>
 
-{
-  "prompt": "Hello Beq",
-  "max_tokens": 80,
-  "temperature": 0.8
-}</pre>
-    <p>Example with curl:</p>
+    <h2>cURL</h2>
     <pre>curl -X POST https://YOUR-HOST/api/generate \
   -H "Authorization: Bearer beq_YOUR_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"prompt":"Hello","max_tokens":60}'</pre>
-    <p>Public status (no key): <code>GET /api/status</code></p>
+  -d '{"prompt":"Hello Beq","max_tokens":80,"temperature":0.8}'</pre>
+
+    <h2>Python (beq-client package)</h2>
+    <pre>pip install -e ./python
+
+from beq_client import Beq
+
+beq = Beq(
+    base_url="https://YOUR-HOST",
+    api_key="beq_YOUR_KEY",
+    language="de",  # en, de, fr, es, it, pt, nl, pl, ru, ja, zh, ko, tr, ar
+)
+
+print(beq.generate("Who are you?"))
+print(beq.chat("Write a short poem", language="en", max_tokens=100))
+print(beq.status())
+print(Beq.languages())</pre>
+
+    <h2>HTML + JavaScript (fetch)</h2>
+    <pre><script>
+async function askBeq() {
+  const res = await fetch("https://YOUR-HOST/api/generate", {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer beq_YOUR_KEY",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      prompt: "Hello Beq",
+      max_tokens: 80,
+      temperature: 0.8
+    })
+  });
+  const data = await res.json();
+  console.log(data.new_text);
+}
+</script></pre>
+
+    <h2>Node.js</h2>
+    <pre>const res = await fetch("https://YOUR-HOST/api/generate", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer beq_YOUR_KEY",
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    prompt: "Hello Beq",
+    max_tokens: 80,
+    temperature: 0.8
+  })
+});
+const data = await res.json();
+console.log(data.new_text);</pre>
+
+    <h2>Next.js (App Router)</h2>
+    <pre>// app/actions.ts
+"use server";
+
+export async function askBeq(prompt: string) {
+  const res = await fetch("https://YOUR-HOST/api/generate", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.BEQ_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ prompt, max_tokens: 80, temperature: 0.8 })
+  });
+  return res.json();
+}</pre>
+
+    <h2>Node.js (with node-fetch)</h2>
+    <pre>import fetch from "node-fetch";
+
+const res = await fetch("https://YOUR-HOST/api/generate", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer beq_YOUR_KEY",
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    prompt: "Hello Beq",
+    max_tokens: 80,
+    temperature: 0.8
+  })
+});
+const data = await res.json();
+console.log(data.new_text);</pre>
+
+    <h2>PHP</h2>
+    <pre><?php
+$ch = curl_init("https://YOUR-HOST/api/generate");
+curl_setopt_array($ch, [
+  CURLOPT_POST => true,
+  CURLOPT_HTTPHEADER => [
+    "Authorization: Bearer beq_YOUR_KEY",
+    "Content-Type: application/json"
+  ],
+  CURLOPT_POSTFIELDS => json_encode([
+    "prompt" => "Hello Beq",
+    "max_tokens" => 80,
+    "temperature" => 0.8
+  ]),
+  CURLOPT_RETURNTRANSFER => true
+]);
+$response = curl_exec($ch);
+curl_close($ch);
+$data = json_decode($response, true);
+echo $data["new_text"];</pre>
+
+    <h2>HTML + JavaScript (fetch)</h2>
+    <pre><script>
+async function askBeq() {
+  const res = await fetch("https://YOUR-HOST/api/generate", {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer beq_YOUR_KEY",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      prompt: "Hello Beq",
+      max_tokens: 80,
+      temperature: 0.8
+    })
+  });
+  const data = await res.json();
+  console.log(data.new_text);
+}
+</script></pre>
+
+    <h2>Node.js</h2>
+    <pre>const res = await fetch("https://YOUR-HOST/api/generate", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer beq_YOUR_KEY",
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    prompt: "Hello Beq",
+    max_tokens: 80,
+    temperature: 0.8
+  })
+});
+const data = await res.json();
+console.log(data.new_text);</pre>
+
+    <h2>Next.js (App Router)</h2>
+    <pre>// app/actions.ts
+"use server";
+
+export async function askBeq(prompt: string) {
+  const res = await fetch("https://YOUR-HOST/api/generate", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.BEQ_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ prompt, max_tokens: 80, temperature: 0.8 })
+  });
+  return res.json();
+}</pre>
+
+    <h2>Node.js</h2>
+    <pre>const res = await fetch("https://YOUR-HOST/api/generate", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer beq_YOUR_KEY",
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    prompt: "Hello Beq",
+    max_tokens: 80,
+    temperature: 0.8
+  })
+});
+const data = await res.json();
+console.log(data.new_text);</pre>
+
+    <h2>PHP</h2>
+    <pre><?php
+$ch = curl_init("https://YOUR-HOST/api/generate");
+curl_setopt_array($ch, [
+  CURLOPT_POST => true,
+  CURLOPT_HTTPHEADER => [
+    "Authorization: Bearer beq_YOUR_KEY",
+    "Content-Type: application/json"
+  ],
+  CURLOPT_POSTFIELDS => json_encode([
+    "prompt" => "Hello Beq",
+    "max_tokens" => 80,
+    "temperature" => 0.8
+  ]),
+  CURLOPT_RETURNTRANSFER => true
+]);
+$response = curl_exec($ch);
+curl_close($ch);
+$data = json_decode($response, true);
+echo $data["new_text"];</pre>
+
+    <h2>Java</h2>
+    <pre>var client = HttpClient.newHttpClient();
+var request = HttpRequest.newBuilder()
+    .uri(URI.create("https://YOUR-HOST/api/generate"))
+    .header("Authorization", "Bearer beq_YOUR_KEY")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {"prompt":"Hello Beq","max_tokens":80,"temperature":0.8}
+        """))
+    .build();
+var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body());</pre>
+
+    <h2>.NET (C#)</h2>
+    <pre>using var client = new HttpClient();
+client.DefaultRequestHeaders.Add("Authorization", "Bearer beq_YOUR_KEY");
+var json = """{"prompt":"Hello Beq","max_tokens":80,"temperature":0.8}""";
+var content = new StringContent(json, Encoding.UTF8, "application/json");
+var response = await client.PostAsync("https://YOUR-HOST/api/generate", content);
+var result = await response.Content.ReadAsStringAsync();
+Console.WriteLine(result);</pre>
+
+    <h2>PHP</h2>
+    <pre><?php
+$ch = curl_init("https://YOUR-HOST/api/generate");
+curl_setopt_array($ch, [
+  CURLOPT_POST => true,
+  CURLOPT_HTTPHEADER => [
+    "Authorization: Bearer beq_YOUR_KEY",
+    "Content-Type: application/json"
+  ],
+  CURLOPT_POSTFIELDS => json_encode([
+    "prompt" => "Hello Beq",
+    "max_tokens" => 80,
+    "temperature" => 0.8
+  ]),
+  CURLOPT_RETURNTRANSFER => true
+]);
+$response = curl_exec($ch);
+curl_close($ch);
+$data = json_decode($response, true);
+echo $data["new_text"];</pre>
+
+    <h2>HTML + JavaScript</h2>
+    <pre><script>
+async function askBeq() {
+  const res = await fetch("https://YOUR-HOST/api/generate", {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer beq_YOUR_KEY",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      prompt: "Hello Beq",
+      max_tokens: 80,
+      temperature: 0.8
+    })
+  });
+  const data = await res.json();
+  console.log(data.new_text);
+}
+</script></pre>
+
+    <h2>Node.js</h2>
+    <pre>const res = await fetch("https://YOUR-HOST/api/generate", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer beq_YOUR_KEY",
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    prompt: "Hello Beq",
+    max_tokens: 80,
+    temperature: 0.8
+  })
+});
+const data = await res.json();
+console.log(data.new_text);</pre>
+
+    <h2>Next.js (App Router)</h2>
+    <pre>// app/actions.ts
+"use server";
+
+export async function askBeq(prompt: string) {
+  const res = await fetch("https://YOUR-HOST/api/generate", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.BEQ_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ prompt, max_tokens: 80, temperature: 0.8 })
+  });
+  return res.json();
+}</pre>
+
+    <h2>PHP</h2>
+    <pre><?php
+$ch = curl_init("https://YOUR-HOST/api/generate");
+curl_setopt_array($ch, [
+  CURLOPT_POST => true,
+  CURLOPT_HTTPHEADER => [
+    "Authorization: Bearer beq_YOUR_KEY",
+    "Content-Type: application/json"
+  ],
+  CURLOPT_POSTFIELDS => json_encode([
+    "prompt" => "Hello Beq",
+    "max_tokens" => 80,
+    "temperature" => 0.8
+  ]),
+  CURLOPT_RETURNTRANSFER => true
+]);
+$response = curl_exec($ch);
+curl_close($ch);
+$data = json_decode($response, true);
+echo $data["new_text"];</pre>
+
+    <h2>Java</h2>
+    <pre>var client = HttpClient.newHttpClient();
+var request = HttpRequest.newBuilder()
+    .uri(URI.create("https://YOUR-HOST/api/generate"))
+    .header("Authorization", "Bearer beq_YOUR_KEY")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {"prompt":"Hello Beq","max_tokens":80,"temperature":0.8}
+        """))
+    .build();
+var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body());</pre>
+
+    <h2>.NET (C#)</h2>
+    <pre>using var client = new HttpClient();
+client.DefaultRequestHeaders.Add("Authorization", "Bearer beq_YOUR_KEY");
+var json = """{"prompt":"Hello Beq","max_tokens":80,"temperature":0.8}""";
+var content = new StringContent(json, Encoding.UTF8, "application/json");
+var response = await client.PostAsync("https://YOUR-HOST/api/generate", content);
+var result = await response.Content.ReadAsStringAsync();
+Console.WriteLine(result);</pre>
 </div>
 {% endblock %}
