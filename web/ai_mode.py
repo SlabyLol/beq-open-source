@@ -2,37 +2,13 @@
 Beq – AI Mode Config
 =====================
 
-Beq's behavior is switched between three modes, either by editing
-`configs/AI.txt` (local dev) or, better, through the HTTP config API
-(`/api/config`) or the admin panel (`/admin`) — those write to the database
-via web/settings_store.py, so the mode survives Render redeploys.
-
-Just change the mode, save/submit it, done — no restart needed. Beq re-reads
-the current value automatically (cached for a few seconds).
-
-Modes
------
-default  Normal general-purpose assistant persona. This is what a fresh
-         install ships with.
-hilfe    "Hilfe-Modus" — a support/help-desk persona meant for helping
-         other people who use the chat. Friendlier, more patient framing.
-private  Your own dev/training mode. Chat access is restricted to the admin
-         account, and the admin panel (mode switch + training controls)
-         becomes visible.
-
-Important honesty note (please read)
--------------------------------------
-Beq is a small, from-scratch, *character-level* language model (see
-model/transformer.py) — it is NOT an instruction-following model like
-ChatGPT/Claude. These "modes" change:
-  1) what text is silently prepended to the prompt before generation
-     (a soft steering hint), and
-  2) how the *web app itself* behaves (who can chat, whether the admin
-     panel is shown, etc).
-They do NOT magically make the model understand instructions it was never
-trained on. If you want the model to actually behave differently per mode
-(e.g. answer in a support-agent tone), the most reliable way is to include
-examples of that style in `data/input.txt` and retrain.
+Modes (default | hilfe | private) come from DB / configs/AI.txt.
+Optional configs/*.sbe can set:
+  [ai]
+  ai=default
+  name=YourName
+so the model stays a normal AI but uses another display name in the preamble.
+.sbe is never required for training or running.
 """
 
 from __future__ import annotations
@@ -86,16 +62,8 @@ DEFAULT_MODE = "default"
 
 _DEFAULT_FILE_CONTENT = (
     "# Beq AI Mode Config\n"
-    "#\n"
-    "# Valid values for `mode`: default | hilfe | private\n"
-    "#   default -> normal assistant, open to everyone\n"
-    "#   hilfe   -> support/help persona, open to everyone\n"
-    "#   private -> owner-only, unlocks the admin/training panel\n"
-    "#\n"
-    "# NOTE: on Render (and most free hosts) this file resets on every\n"
-    "# redeploy. The real, persistent source of truth is the database\n"
-    "# (see web/settings_store.py) once DATABASE_URL is set. This file is\n"
-    "# still read as a fallback for local dev without a database.\n"
+    "# Valid: default | hilfe | private\n"
+    "# Optional override from configs/*.sbe [ai] ai=default name=...\n"
     "\n"
     "mode: default\n"
 )
@@ -147,13 +115,6 @@ def _write_to_file(new_mode: str) -> None:
 
 
 def get_mode_key() -> str:
-    """
-    Active mode key.
-
-    Priority: database setting (persists across Render redeploys) -> local
-    configs/AI.txt (fallback for local dev / no DB configured).
-    Cached for a few seconds so we don't hit the DB on every keystroke.
-    """
     now = time.monotonic()
     if now - _cache["checked_at"] < _CACHE_TTL_SECONDS:
         return _cache["mode"]
@@ -164,7 +125,19 @@ def get_mode_key() -> str:
         if value in MODES:
             mode = value
     except Exception:
-        mode = None  # DB not reachable/initialized yet -> fall back to file
+        mode = None
+
+    # Optional .sbe [ai] ai=default|hilfe|private (only if no DB mode set)
+    if mode is None:
+        try:
+            from web.knowledge import get_sbe_profile
+
+            profile = get_sbe_profile()
+            sbe_ai = (profile.get("ai") or "").strip().lower()
+            if sbe_ai in MODES:
+                mode = sbe_ai
+        except Exception:
+            pass
 
     if mode is None:
         mode = _read_from_file()
@@ -178,6 +151,36 @@ def get_mode_config() -> dict:
     key = get_mode_key()
     cfg = dict(MODES[key])
     cfg["key"] = key
+
+    # Optional display name from .sbe — normal AI (ai=default) with another name
+    try:
+        from web.knowledge import get_sbe_profile
+
+        profile = get_sbe_profile()
+        name = (profile.get("name") or "").strip()
+        about = (profile.get("about") or "").strip()
+        if name and name.lower() != "beq":
+            if key == "default":
+                cfg["preamble"] = (
+                    f"You are {name}, a helpful, friendly general-purpose assistant. "
+                    f"Answer clearly and stay on topic.\n\n"
+                )
+            elif key == "hilfe":
+                cfg["preamble"] = (
+                    f"You are {name} in support mode. Help the person clearly and patiently. "
+                    f"Be concise, kind, and practical.\n\n"
+                )
+            elif key == "private":
+                cfg["preamble"] = (
+                    f"You are {name} in private development mode, talking to your developer.\n\n"
+                )
+            cfg["display_name"] = name
+        if about:
+            cfg["about"] = about
+        cfg["sbe_profile"] = profile
+    except Exception:
+        cfg["display_name"] = "Beq"
+
     return cfg
 
 
@@ -186,19 +189,16 @@ def set_mode(new_mode: str) -> tuple[bool, str]:
     if new_mode not in MODES:
         return False, f"Unknown mode '{new_mode}'. Valid: {', '.join(MODES)}"
 
-    # Persistent copy (survives Render redeploys)
     try:
         settings_store.init_settings_table()
         settings_store.set_setting(SETTING_KEY, new_mode)
     except Exception as e:
-        # Still fine locally without a DB - file fallback below covers it.
         print(f"[ai_mode] could not persist to DB ({e}); using file fallback only")
 
-    # Human-readable mirror on disk (nice for local dev)
     try:
         _write_to_file(new_mode)
     except Exception as e:
         print(f"[ai_mode] could not write configs/AI.txt ({e})")
 
-    _cache["checked_at"] = 0.0  # force reload on next get_mode_key()
+    _cache["checked_at"] = 0.0
     return True, f"Mode set to '{new_mode}'"
