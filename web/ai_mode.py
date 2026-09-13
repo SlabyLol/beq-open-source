@@ -2,13 +2,9 @@
 Beq – AI Mode Config
 =====================
 
-Modes (default | hilfe | private) come from DB / configs/AI.txt.
-Optional configs/*.sbe can set:
-  [ai]
-  ai=default
-  name=YourName
-so the model stays a normal AI but uses another display name in the preamble.
-.sbe is never required for training or running.
+Modes: default | help | private
+Optional configs/*.sbe [ai] ai=default name=... for normal AI with custom name.
+.sbe is never required for training.
 """
 
 from __future__ import annotations
@@ -20,6 +16,9 @@ from web import settings_store
 
 AI_TXT_PATH = Path(__file__).resolve().parents[1] / "configs" / "AI.txt"
 SETTING_KEY = "ai_mode"
+
+# Legacy alias: old installs may still have "hilfe" in DB/file
+_MODE_ALIASES = {"hilfe": "help"}
 
 MODES: dict[str, dict] = {
     "default": {
@@ -33,12 +32,12 @@ MODES: dict[str, dict] = {
         "public_chat": True,
         "show_admin_panel": False,
     },
-    "hilfe": {
-        "label": "Hilfe-Modus",
-        "badge": "🟡 Hilfe-Modus",
+    "help": {
+        "label": "Help",
+        "badge": "🟡 Help",
         "description": "Support / help-desk mode for people you're helping.",
         "preamble": (
-            "You are Beq in support mode. Your only goal is to help the "
+            "You are Beq in help mode. Your only goal is to help the "
             "person in front of you as clearly and patiently as possible. "
             "Be concise, kind, and practical.\n\n"
         ),
@@ -62,14 +61,20 @@ DEFAULT_MODE = "default"
 
 _DEFAULT_FILE_CONTENT = (
     "# Beq AI Mode Config\n"
-    "# Valid: default | hilfe | private\n"
-    "# Optional override from configs/*.sbe [ai] ai=default name=...\n"
+    "# Valid: default | help | private\n"
+    "# (legacy alias: hilfe -> help)\n"
     "\n"
     "mode: default\n"
 )
 
 _CACHE_TTL_SECONDS = 3.0
 _cache = {"checked_at": 0.0, "mtime": None, "mode": DEFAULT_MODE}
+
+
+def _normalize_mode(name: str) -> str:
+    name = (name or "").strip().lower()
+    name = _MODE_ALIASES.get(name, name)
+    return name if name in MODES else DEFAULT_MODE
 
 
 def _ensure_file() -> None:
@@ -86,11 +91,11 @@ def _parse_mode(raw: str) -> str:
         if ":" in line:
             key, _, value = line.partition(":")
             if key.strip().lower() == "mode":
-                candidate = value.strip().lower()
-                if candidate in MODES:
-                    return candidate
-        elif line.lower() in MODES:
-            return line.lower()
+                return _normalize_mode(value.strip())
+        else:
+            candidate = _normalize_mode(line)
+            if candidate in MODES:
+                return candidate
     return DEFAULT_MODE
 
 
@@ -122,18 +127,19 @@ def get_mode_key() -> str:
     mode = None
     try:
         value = settings_store.get_setting(SETTING_KEY)
-        if value in MODES:
-            mode = value
+        if value:
+            mode = _normalize_mode(value)
+            if mode not in MODES:
+                mode = None
     except Exception:
         mode = None
 
-    # Optional .sbe [ai] ai=default|hilfe|private (only if no DB mode set)
     if mode is None:
         try:
             from web.knowledge import get_sbe_profile
 
             profile = get_sbe_profile()
-            sbe_ai = (profile.get("ai") or "").strip().lower()
+            sbe_ai = _normalize_mode(profile.get("ai") or "")
             if sbe_ai in MODES:
                 mode = sbe_ai
         except Exception:
@@ -152,7 +158,6 @@ def get_mode_config() -> dict:
     cfg = dict(MODES[key])
     cfg["key"] = key
 
-    # Optional display name from .sbe — normal AI (ai=default) with another name
     try:
         from web.knowledge import get_sbe_profile
 
@@ -165,9 +170,9 @@ def get_mode_config() -> dict:
                     f"You are {name}, a helpful, friendly general-purpose assistant. "
                     f"Answer clearly and stay on topic.\n\n"
                 )
-            elif key == "hilfe":
+            elif key == "help":
                 cfg["preamble"] = (
-                    f"You are {name} in support mode. Help the person clearly and patiently. "
+                    f"You are {name} in help mode. Help the person clearly and patiently. "
                     f"Be concise, kind, and practical.\n\n"
                 )
             elif key == "private":
@@ -185,7 +190,7 @@ def get_mode_config() -> dict:
 
 
 def set_mode(new_mode: str) -> tuple[bool, str]:
-    new_mode = new_mode.strip().lower()
+    new_mode = _normalize_mode(new_mode)
     if new_mode not in MODES:
         return False, f"Unknown mode '{new_mode}'. Valid: {', '.join(MODES)}"
 
