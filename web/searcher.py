@@ -1,7 +1,8 @@
-"""Beq Search — fast Wikipedia (few tries) + DDG + store. Chat must stay under ~10s."""
+"""Beq Search — Wikipedia/DDG/store with hard wall-clock timeout."""
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from urllib.parse import quote
 
 try:
@@ -16,8 +17,9 @@ try:
 except Exception:
     pass
 
-TIMEOUT = 3.0
-USER_AGENT = "BeqSearchBot/1.5 (+https://beq.onrender.com)"
+TIMEOUT = 2.5
+WALL_TIMEOUT = 8.0
+USER_AGENT = "BeqSearchBot/1.6 (+https://beq.onrender.com)"
 
 
 def _client():
@@ -47,21 +49,13 @@ def search_wikipedia(query: str) -> dict | None:
     q = (query or "").strip()
     if not q or httpx is None:
         return None
-    # Max 2 title attempts + optional opensearch — keep total under ~9s
     words = re.findall(r"[A-Za-z][A-Za-z0-9\-]+", q)
     candidates = [q]
-    if words:
-        last = words[-1]
-        if last.lower() != q.lower():
-            candidates.append(last.title() if last.islower() else last)
-    seen = set()
+    if words and words[-1].lower() != q.lower():
+        candidates.append(words[-1].title())
     try:
         with _client() as client:
             for cand in candidates[:2]:
-                cand = cand.strip()
-                if not cand or cand.lower() in seen:
-                    continue
-                seen.add(cand.lower())
                 try:
                     r = client.get(
                         f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote(cand)}"
@@ -196,7 +190,7 @@ def _looks_like_search(prompt: str) -> bool:
     return False
 
 
-def try_search_answer(prompt: str, use_web: bool = True) -> str | None:
+def _search_body(prompt: str, use_web: bool) -> str | None:
     if not crawler.is_enabled():
         return None
     if not crawler.auto_search_enabled() and not crawler.web_in_chat_enabled():
@@ -224,9 +218,7 @@ def try_search_answer(prompt: str, use_web: bool = True) -> str | None:
     parts: list[str] = []
 
     if not store_only:
-        web = search_wikipedia(q)
-        if not web:
-            web = search_duckduckgo(q)
+        web = search_wikipedia(q) or search_duckduckgo(q)
         if web:
             parts.append(web["text"])
             if web.get("url"):
@@ -246,3 +238,17 @@ def try_search_answer(prompt: str, use_web: bool = True) -> str | None:
     if not parts:
         return None
     return "\n".join(parts)[:2000]
+
+
+def try_search_answer(prompt: str, use_web: bool = True) -> str | None:
+    """Never block the chat for more than WALL_TIMEOUT seconds."""
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            fut = pool.submit(_search_body, prompt, use_web)
+            return fut.result(timeout=WALL_TIMEOUT)
+    except FuturesTimeout:
+        print("[searcher] wall timeout — skipping web")
+        return None
+    except Exception as e:
+        print(f"[searcher] try_search: {e}")
+        return None
