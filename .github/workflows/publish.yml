@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/beq
+      url: https://pypi.org/p/beq-open-source
 
     steps:
       - uses: actions/checkout@v4
