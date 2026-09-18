@@ -22,7 +22,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-python-version: "3.10"
+          python-version: "3.10"
 
       - name: Install build tools
         run: |
@@ -35,6 +35,5 @@ jobs:
       - name: Check package
         run: twine check dist/*
 
-      - name: Publish to PyPI
-        uses: pypa/github-action-pypackage-release@release/v1
-        # Kein API-Token/Passwort mehr nötig, da permissions.id-token auf 'write' steht!
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
