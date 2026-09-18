@@ -3,14 +3,13 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
-  workflow_dispatch: # Ermöglicht das manuelle Starten über GitHub
+  workflow_dispatch:
 
 jobs:
   publish:
     name: Publish to PyPI
     runs-on: ubuntu-latest
 
-    # WICHTIG: Diese Berechtigungen sind zwingend erforderlich für Trusted Publishing!
     permissions:
       id-token: write
       contents: read
@@ -37,3 +36,8 @@ jobs:
 
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Verhindert Fehler durch Sigstore-Zertifikate
+          attestations: false
+          # Zeigt im Log den echten Grund an, falls es fehlschlägt
+          verbose: true
