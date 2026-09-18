@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "beq-client"
+name = "beq-open-source"
 version = "0.1.0"
 description = "Python client / plugin for the Beq open-source AI API"
 readme = "README.md"
