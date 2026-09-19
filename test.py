@@ -20,7 +20,7 @@ import torch
 import torch.nn.functional as F
 from safetensors import safe_open
 from safetensors.torch import load_file
-from transformers import BertConfig, BertModel, PreTrainedTokenizerFast
+from transformers import AutoTokenizer, BertConfig, BertModel, PreTrainedTokenizerFast
 
 # ============================ EINSTELLUNGEN ============================
 BASE_DIR = Path(__file__).resolve().parent
@@ -31,6 +31,10 @@ TEXTS_FILE = BASE_DIR / "texte.txt"
 NUM_HEADS = 12       # bei hidden=384 üblich (MiniLM, bge-small); nicht aus der Datei lesbar
 POOLING = "mean"     # "mean" (MiniLM) oder "cls" (bge)
 TOP_K = 3
+
+# Wird automatisch heruntergeladen, falls tokenizer.json kaputt ist oder fehlt
+# (alle MiniLM-L6-Modelle nutzen dasselbe Vokabular mit 30522 Einträgen).
+TOKENIZER_FALLBACK = "sentence-transformers/all-MiniLM-L6-v2"
 # =======================================================================
 
 EXAMPLE_TEXTS = [
@@ -62,22 +66,34 @@ def build_config():
     )
 
 
+def load_tokenizer():
+    try:
+        return PreTrainedTokenizerFast(
+            tokenizer_file=str(TOKENIZER_FILE),
+            unk_token="[UNK]", pad_token="[PAD]", cls_token="[CLS]",
+            sep_token="[SEP]", mask_token="[MASK]",
+        )
+    except Exception as e:
+        print(f"Warnung: tokenizer.json ist kaputt oder fehlt ({e}).")
+        print(f"Lade stattdessen den passenden Tokenizer von {TOKENIZER_FALLBACK} ...")
+        try:
+            return AutoTokenizer.from_pretrained(TOKENIZER_FALLBACK)
+        except Exception as e2:
+            raise SystemExit(
+                "Auch der Download hat nicht geklappt (Internetverbindung?):\n" + str(e2)
+            )
+
+
 def load():
-    for f in (MODEL_FILE, TOKENIZER_FILE):
-        if not f.exists():
-            raise SystemExit(f"Datei nicht gefunden: {f}")
+    if not MODEL_FILE.exists():
+        raise SystemExit(f"Datei nicht gefunden: {MODEL_FILE}")
     model = BertModel(build_config(), add_pooling_layer=False)
     state = load_file(str(MODEL_FILE))
     state = {k.removeprefix("bert."): v for k, v in state.items()}
     missing, _ = model.load_state_dict(state, strict=False)
     if missing:
         print(f"Warnung: fehlende Gewichte: {missing[:3]}")
-    tokenizer = PreTrainedTokenizerFast(
-        tokenizer_file=str(TOKENIZER_FILE),
-        unk_token="[UNK]", pad_token="[PAD]", cls_token="[CLS]",
-        sep_token="[SEP]", mask_token="[MASK]",
-    )
-    return model.eval(), tokenizer
+    return model.eval(), load_tokenizer()
 
 
 @torch.no_grad()
