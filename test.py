@@ -1,50 +1,34 @@
 #!/usr/bin/env python3
 """
-Load and run modul.safetensors
+Interaktiver Chat mit modul.safetensors
 
-Install:
+Installation:
     pip install safetensors torch transformers
 
-Usage:
-    # 1) Inspect the file (tensor names, shapes, dtypes, metadata)
-    python run_safetensors.py modul.safetensors
+Start:
+    python chat_safetensors.py modul.safetensors --config-dir ./model_folder
 
-    # 2) Run it as a text-generation model (needs config.json + tokenizer files in a folder)
-    python run_safetensors.py modul.safetensors --config-dir ./model_folder --prompt "Hello"
+Der Ordner (--config-dir) braucht config.json und die Tokenizer-Dateien
+(tokenizer.json / tokenizer_config.json usw.).
+
+Befehle im Chat:
+    /reset  -> Verlauf löschen
+    /exit   -> Beenden
 """
 import argparse
 from pathlib import Path
 
-from safetensors import safe_open
+import torch
+from safetensors.torch import load_file
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    TextStreamer,
+)
 
 
-def inspect(path: Path, limit: int = 40) -> None:
-    """Print metadata and tensor info without loading weights into memory."""
-    total_params = 0
-    with safe_open(str(path), framework="pt", device="cpu") as f:
-        print(f"File: {path}")
-        print(f"Metadata: {f.metadata()}\n")
-        keys = list(f.keys())
-        for i, key in enumerate(keys):
-            sl = f.get_slice(key)
-            shape = sl.get_shape()
-            n = 1
-            for d in shape:
-                n *= d
-            total_params += n
-            if i < limit:
-                print(f"{key:70s} {str(shape):25s} {sl.get_dtype()}")
-        if len(keys) > limit:
-            print(f"... and {len(keys) - limit} more tensors")
-    print(f"\nTensors: {len(keys)} | Parameters: {total_params:,}")
-
-
-def run_causal_lm(path: Path, config_dir: Path, prompt: str, max_new_tokens: int) -> None:
-    """Build a model from config.json, load the safetensors weights, generate text."""
-    import torch
-    from safetensors.torch import load_file
-    from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
-
+def load_model(path: Path, config_dir: Path):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
 
@@ -55,33 +39,90 @@ def run_causal_lm(path: Path, config_dir: Path, prompt: str, max_new_tokens: int
     state_dict = load_file(str(path))
     missing, unexpected = model.load_state_dict(state_dict, strict=False)
     if missing:
-        print(f"Warning: {len(missing)} missing keys (e.g. {missing[:3]})")
+        print(f"Warnung: {len(missing)} fehlende Keys (z.B. {missing[:3]})")
     if unexpected:
-        print(f"Warning: {len(unexpected)} unexpected keys (e.g. {unexpected[:3]})")
+        print(f"Warnung: {len(unexpected)} unerwartete Keys (z.B. {unexpected[:3]})")
 
     model.to(device).eval()
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
-    with torch.no_grad():
-        output = model.generate(**inputs, max_new_tokens=max_new_tokens)
-    print(tokenizer.decode(output[0], skip_special_tokens=True))
+    return model, tokenizer, device
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Inspect or run a .safetensors model")
-    parser.add_argument("path", nargs="?", default="modul.safetensors", help="Path to .safetensors file")
-    parser.add_argument("--config-dir", type=Path, help="Folder with config.json and tokenizer files")
-    parser.add_argument("--prompt", default="Hello, my name is", help="Prompt for text generation")
-    parser.add_argument("--max-new-tokens", type=int, default=50)
-    args = parser.parse_args()
+def build_inputs(tokenizer, history, device):
+    """Nutzt das Chat-Template des Modells, falls vorhanden."""
+    if getattr(tokenizer, "chat_template", None):
+        ids = tokenizer.apply_chat_template(
+            history, add_generation_prompt=True, return_tensors="pt"
+        )
+        if not isinstance(ids, torch.Tensor):  # neuere transformers-Versionen
+            ids = ids["input_ids"]
+        return ids.to(device)
+
+    # Fallback ohne Template: einfacher Text-Prompt
+    text = ""
+    for m in history:
+        who = "User" if m["role"] == "user" else "Assistant"
+        text += f"{who}: {m['content']}\n"
+    text += "Assistant:"
+    return tokenizer(text, return_tensors="pt").input_ids.to(device)
+
+
+def chat(model, tokenizer, device, system, max_new_tokens, temperature):
+    streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+    history = [{"role": "system", "content": system}] if system else []
+
+    print("Chat gestartet. /reset = Verlauf löschen, /exit = Beenden\n")
+    while True:
+        try:
+            user = input("Du: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not user:
+            continue
+        if user == "/exit":
+            break
+        if user == "/reset":
+            history = [{"role": "system", "content": system}] if system else []
+            print("Verlauf gelöscht.\n")
+            continue
+
+        history.append({"role": "user", "content": user})
+        input_ids = build_inputs(tokenizer, history, device)
+
+        print("Modell: ", end="", flush=True)
+        with torch.no_grad():
+            output = model.generate(
+                input_ids,
+                attention_mask=torch.ones_like(input_ids),
+                max_new_tokens=max_new_tokens,
+                do_sample=temperature > 0,
+                temperature=temperature if temperature > 0 else None,
+                streamer=streamer,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+        reply = tokenizer.decode(
+            output[0][input_ids.shape[-1]:], skip_special_tokens=True
+        ).strip()
+        history.append({"role": "assistant", "content": reply})
+        print()
+
+
+def main():
+    p = argparse.ArgumentParser(description="Chat mit einer .safetensors-Datei")
+    p.add_argument("path", nargs="?", default="modul.safetensors")
+    p.add_argument("--config-dir", type=Path, required=True,
+                   help="Ordner mit config.json und Tokenizer-Dateien")
+    p.add_argument("--system", default="Du bist ein hilfreicher Assistent.")
+    p.add_argument("--max-new-tokens", type=int, default=256)
+    p.add_argument("--temperature", type=float, default=0.7)
+    args = p.parse_args()
 
     path = Path(args.path)
     if not path.exists():
-        raise SystemExit(f"File not found: {path}")
+        raise SystemExit(f"Datei nicht gefunden: {path}")
 
-    if args.config_dir:
-        run_causal_lm(path, args.config_dir, args.prompt, args.max_new_tokens)
-    else:
-        inspect(path)
+    model, tokenizer, device = load_model(path, args.config_dir)
+    chat(model, tokenizer, device, args.system, args.max_new_tokens, args.temperature)
 
 
 if __name__ == "__main__":
